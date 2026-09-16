@@ -6,8 +6,9 @@
         android:supportsRtl="true"
         android:theme="@android:style/Theme.Material.NoActionBar"
         android:hardwareAccelerated="true">
+
         <activity
-            android:name=".MainActivity"
+            android:name=".StartupActivity"
             android:exported="true"
             android:screenOrientation="landscape"
             android:configChanges="orientation|screenSize|keyboardHidden">
@@ -16,5 +17,17 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="false"
+            android:screenOrientation="landscape"
+            android:configChanges="orientation|screenSize|keyboardHidden" />
+
+        <activity
+            android:name=".SettingsActivity"
+            android:exported="false"
+            android:screenOrientation="landscape"
+            android:configChanges="orientation|screenSize|keyboardHidden" />
     </application>
 </manifest>
