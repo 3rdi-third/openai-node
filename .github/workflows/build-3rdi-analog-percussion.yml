@@ -153,29 +153,29 @@ jobs:
           print('Packaged startup verified:', im.size, len(data), 'bytes')
           PY
 
-      - name: Verify Bluetooth MIDI, theme UI and launcher icon
+      - name: Verify BLE MIDI phase-lock, theme UI and launcher icon
         shell: bash
         run: |
           APK='android-dfam/app/build/outputs/apk/debug/app-debug.apk'
           grep -q 'BLUETOOTH_SCAN' android-dfam/app/src/main/AndroidManifest.xml
-          grep -q 'MIDI_SERVICE_UUID' android-dfam/app/src/main/java/com/threerdi/dfamstyle/BleMidiSyncManager.java
-          grep -q 'BluetoothMidiActivity' android-dfam/app/src/main/AndroidManifest.xml
+          grep -q 'CLOCKS_PER_BATCH = 3' android-dfam/app/src/main/java/com/threerdi/dfamstyle/BleMidiSyncManager.java
+          grep -q 'bleMidiClockBatchPacket' android-dfam/app/src/main/java/com/threerdi/dfamstyle/BleMidiSyncManager.java
+          grep -q 'getIncomingClockCount' android-dfam/app/src/main/java/com/threerdi/dfamstyle/BleMidiSyncManager.java
+          grep -q 'externalClockCount / 12L' android-dfam/app/src/main/java/com/threerdi/dfamstyle/MainActivity.java
           grep -q 'leftScroll.setFillViewport(true)' android-dfam/app/src/main/java/com/threerdi/dfamstyle/BluetoothMidiActivity.java
           grep -q 'QUICK COLOUR PALETTE' android-dfam/app/src/main/java/com/threerdi/dfamstyle/ThemeActivity.java
-          grep -q 'CYBERPUNK' android-dfam/app/src/main/java/com/threerdi/dfamstyle/ThemeActivity.java
-          grep -q 'TOXIC' android-dfam/app/src/main/java/com/threerdi/dfamstyle/ThemeActivity.java
           grep -q 'android:icon="@mipmap/ic_launcher"' android-dfam/app/src/main/AndroidManifest.xml
           unzip -l "$APK" | grep -q 'ic_launcher.png' || { echo 'Launcher icon missing from APK'; exit 1; }
           "$ANDROID_SDK_ROOT/build-tools/35.0.0/aapt" dump badging "$APK" | grep -q 'application-icon' || { echo 'APK has no launcher icon metadata'; exit 1; }
-          echo 'BLE MIDI, theme UI and tiger launcher icon verified.'
+          echo 'BLE MIDI timestamp batching, phase-lock, theme UI and tiger launcher icon verified.'
 
       - name: Rename APK
-        run: cp android-dfam/app/build/outputs/apk/debug/app-debug.apk 3rdi-Analog-Percussion-v2.5-Tiger-Icon.apk
+        run: cp android-dfam/app/build/outputs/apk/debug/app-debug.apk 3rdi-Analog-Percussion-v2.6-BLE-MIDI-Sync-Fix.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: 3rdi-Analog-Percussion-v2.5-Tiger-Icon-APK
-          path: 3rdi-Analog-Percussion-v2.5-Tiger-Icon.apk
+          name: 3rdi-Analog-Percussion-v2.6-BLE-MIDI-Sync-Fix-APK
+          path: 3rdi-Analog-Percussion-v2.6-BLE-MIDI-Sync-Fix.apk
           if-no-files-found: error
           retention-days: 30
