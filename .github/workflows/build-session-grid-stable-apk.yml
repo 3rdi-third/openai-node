@@ -37,8 +37,8 @@ jobs:
         run: |
           set -euo pipefail
           INPUT="android-session-grid/app/build/outputs/apk/release/app-release-unsigned.apk"
-          ALIGNED="android-session-grid/app/build/outputs/apk/release/3rdi-session-grid-v1.5.2-aligned.apk"
-          FINAL="android-session-grid/app/build/outputs/apk/release/3rdi-session-grid-v1.5.2-installable.apk"
+          ALIGNED="android-session-grid/app/build/outputs/apk/release/3rdi-session-grid-v1.6.0-aligned.apk"
+          FINAL="android-session-grid/app/build/outputs/apk/release/3rdi-session-grid-v1.6.0-installable.apk"
           test -s "$INPUT"
 
           ZIPALIGN="$(find "$ANDROID_HOME/build-tools" -type f -name zipalign -print | sort -V | tail -1)"
@@ -48,8 +48,8 @@ jobs:
 
           keytool -genkeypair -v \
             -keystore /tmp/3rdi-session-grid-install.jks \
-            -storepass sessiongrid152 \
-            -keypass sessiongrid152 \
+            -storepass sessiongrid160 \
+            -keypass sessiongrid160 \
             -alias sessiongrid \
             -keyalg RSA -keysize 2048 -validity 10000 \
             -dname "CN=3rdi Session Grid, OU=Android, O=3rdi, C=BE"
@@ -58,8 +58,8 @@ jobs:
           "$APKSIGNER" sign \
             --ks /tmp/3rdi-session-grid-install.jks \
             --ks-key-alias sessiongrid \
-            --ks-pass pass:sessiongrid152 \
-            --key-pass pass:sessiongrid152 \
+            --ks-pass pass:sessiongrid160 \
+            --key-pass pass:sessiongrid160 \
             --v1-signing-enabled true \
             --v2-signing-enabled true \
             --v3-signing-enabled true \
@@ -79,6 +79,6 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: 3rdi-session-grid-v1.5.2-installable-apk
-          path: android-session-grid/app/build/outputs/apk/release/3rdi-session-grid-v1.5.2-installable.apk
+          name: 3rdi-session-grid-v1.6.0-installable-apk
+          path: android-session-grid/app/build/outputs/apk/release/3rdi-session-grid-v1.6.0-installable.apk
           if-no-files-found: error
