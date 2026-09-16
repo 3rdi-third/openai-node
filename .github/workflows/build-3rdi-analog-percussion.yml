@@ -36,7 +36,33 @@ jobs:
           yes | "$SDKMANAGER" --licenses >/dev/null || true
           "$SDKMANAGER" 'platform-tools' 'platforms;android-35' 'build-tools;35.0.0'
 
-      - name: Generate verified startup artwork and apply synth integration
+      - name: Decode verified original startup artwork
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import base64
+
+          root = Path('android-dfam')
+          raw = root / 'app/src/main/res/raw/startup_background_b64_v17.txt'
+          data = base64.b64decode(''.join(raw.read_text().split()), validate=True)
+          if not (data[:4] == b'RIFF' and data[8:12] == b'WEBP'):
+              raise RuntimeError('startup artwork is not a valid WebP')
+          out = root / 'app/src/main/res/drawable-nodpi/startup_screen_final.webp'
+          out.parent.mkdir(parents=True, exist_ok=True)
+          out.write_bytes(data)
+          print(f'Wrote {out} ({len(data)} bytes)')
+
+          # The workflow already created the drawable, so remove the obsolete
+          # image-decoding block from the integration patch for this build.
+          patch = root / 'apply_v13.py'
+          text = patch.read_text()
+          marker_start = text.index('# Decode the compact, verified original startup artwork')
+          marker_end = text.index('s = main.read_text()')
+          patch.write_text(text[:marker_start] + text[marker_end:])
+          PY
+
+      - name: Apply synth integration
         run: python3 android-dfam/apply_v13.py
 
       - name: Set up Gradle
@@ -51,8 +77,17 @@ jobs:
       - name: Verify final startup artwork is packaged
         shell: bash
         run: |
-          unzip -l android-dfam/app/build/outputs/apk/debug/app-debug.apk | grep -q 'startup_screen_final' || { echo 'Final startup artwork missing'; exit 1; }
-          echo 'Verified final startup artwork is packaged.'
+          unzip -l android-dfam/app/build/outputs/apk/debug/app-debug.apk | grep -q 'startup_screen_final.webp' || { echo 'Final startup artwork missing'; exit 1; }
+          unzip -p android-dfam/app/build/outputs/apk/debug/app-debug.apk res/drawable-nodpi-v4/startup_screen_final.webp > /tmp/startup.webp || true
+          test -s /tmp/startup.webp || { echo 'Packaged startup artwork could not be extracted'; exit 1; }
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('/tmp/startup.webp')
+          b=p.read_bytes()
+          if not (b[:4]==b'RIFF' and b[8:12]==b'WEBP'):
+              raise SystemExit('Packaged startup artwork is not a valid WebP container')
+          print('Verified packaged startup artwork:', len(b), 'bytes')
+          PY
 
       - name: Rename APK
         run: cp android-dfam/app/build/outputs/apk/debug/app-debug.apk 3rdi-Analog-Percussion-v2.0.apk
