@@ -66,8 +66,6 @@ jobs:
               raise RuntimeError(f'Wrong startup size: {check.size}')
           print('Rendered startup artwork:', check.size, out.stat().st_size, 'bytes')
 
-          # apply_v13.py still contains its obsolete image-decoding preamble.
-          # Strip only that block in the CI workspace; all synth patches remain.
           patch = root / 'apply_v13.py'
           text = patch.read_text()
           marker_start = text.index('# Decode the compact, verified original startup artwork')
@@ -116,15 +114,17 @@ jobs:
           grep -q 'BLUETOOTH_SCAN' android-dfam/app/src/main/AndroidManifest.xml
           grep -q 'MIDI_SERVICE_UUID' android-dfam/app/src/main/java/com/threerdi/dfamstyle/BleMidiSyncManager.java
           grep -q 'BluetoothMidiActivity' android-dfam/app/src/main/AndroidManifest.xml
-          echo 'BLE MIDI source and permissions verified.'
+          grep -q 'leftScroll.setFillViewport(true)' android-dfam/app/src/main/java/com/threerdi/dfamstyle/BluetoothMidiActivity.java
+          grep -q 'dp(38)' android-dfam/app/src/main/java/com/threerdi/dfamstyle/BluetoothMidiActivity.java
+          echo 'BLE MIDI and responsive MIDI UI verified.'
 
       - name: Rename APK
-        run: cp android-dfam/app/build/outputs/apk/debug/app-debug.apk 3rdi-Analog-Percussion-v2.2-BLE-MIDI.apk
+        run: cp android-dfam/app/build/outputs/apk/debug/app-debug.apk 3rdi-Analog-Percussion-v2.3-BLE-MIDI.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: 3rdi-Analog-Percussion-v2.2-BLE-MIDI-APK
-          path: 3rdi-Analog-Percussion-v2.2-BLE-MIDI.apk
+          name: 3rdi-Analog-Percussion-v2.3-BLE-MIDI-APK
+          path: 3rdi-Analog-Percussion-v2.3-BLE-MIDI.apk
           if-no-files-found: error
           retention-days: 30
