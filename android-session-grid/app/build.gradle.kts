@@ -10,11 +10,11 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.threerdi.sessiongrid.sideload"
+        applicationId = "com.threerdi.sessiongrid.compat"
         minSdk = 26
         targetSdk = 35
-        versionCode = 8
-        versionName = "1.5.1"
+        versionCode = 9
+        versionName = "1.5.2"
     }
 
     buildTypes {
@@ -22,9 +22,9 @@ android {
             isDebuggable = false
             isMinifyEnabled = false
             isShrinkResources = false
-            // Installable sideload release. A dedicated package ID avoids
-            // signature conflicts with older development builds.
-            signingConfig = signingConfigs.getByName("debug")
+            // Keep the Gradle release output unsigned. The CI workflow performs
+            // zipalign and explicit APK signing with v1 + v2 + v3 schemes.
+            signingConfig = null
         }
     }
 
@@ -43,8 +43,6 @@ kotlin {
     jvmToolchain(17)
 }
 
-// The startup MP4 is stored as small binary chunks. Reassemble and verify it
-// before Android resource processing so the APK contains the exact media file.
 val prepareStartupVideo by tasks.registering {
     val partsDir = layout.projectDirectory.dir("startup-video-chunks")
     val outputFile = layout.projectDirectory.file("src/main/res/raw/startup_intro.mp4")
