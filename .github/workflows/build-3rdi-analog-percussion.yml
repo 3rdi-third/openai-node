@@ -36,23 +36,42 @@ jobs:
           yes | "$SDKMANAGER" --licenses >/dev/null || true
           "$SDKMANAGER" 'platform-tools' 'platforms;android-35' 'build-tools;35.0.0'
 
-      - name: Sanitize startup artwork resource
+      - name: Recover startup artwork as Android drawable
         shell: bash
         run: |
           python3 - <<'PY'
           from pathlib import Path
-          p = Path('android-dfam/app/src/main/res/raw/startup_background_b64_v17.txt')
-          raw = p.read_text()
+          import base64
+
+          raw_path = Path('android-dfam/app/src/main/res/raw/startup_background_b64_v17.txt')
+          raw = raw_path.read_text()
           alphabet = set('ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=')
           clean = ''.join(ch for ch in raw if ch in alphabet)
-          missing = (-len(clean)) % 4
-          if missing:
-              clean += '=' * missing
-          p.write_text(clean)
-          print(f'Sanitized startup Base64: {len(raw)} -> {len(clean)} chars')
+          clean += '=' * ((-len(clean)) % 4)
+          data = base64.b64decode(clean, validate=False)
+
+          if not data.startswith(b'\xff\xd8'):
+              raise RuntimeError('Startup artwork has no JPEG SOI marker')
+          eoi = data.rfind(b'\xff\xd9')
+          if eoi < 0:
+              raise RuntimeError('Startup artwork has no JPEG EOI marker')
+          data = data[:eoi + 2]
+
+          out = Path('android-dfam/app/src/main/res/drawable-nodpi/startup_screen_v17.jpg')
+          out.parent.mkdir(parents=True, exist_ok=True)
+          out.write_bytes(data)
+          print(f'Recovered startup JPEG: {len(data)} bytes')
+
+          # The artwork is now a real binary drawable. Remove the obsolete
+          # image-decoding preamble from the integration script for this run.
+          patch = Path('android-dfam/apply_v13.py')
+          text = patch.read_text()
+          marker_start = text.index('# Build the startup artwork into a real Android drawable.')
+          marker_end = text.index('s = main.read_text()')
+          patch.write_text(text[:marker_start] + text[marker_end:])
           PY
 
-      - name: Prepare startup artwork and apply synth integration
+      - name: Apply fullscreen theme and preset integration
         run: python3 android-dfam/apply_v13.py
 
       - name: Set up Gradle
