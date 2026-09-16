@@ -11,6 +11,7 @@ import android.os.Bundle;
 import android.view.Gravity;
 import android.view.Window;
 import android.widget.Button;
+import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.Space;
 import android.widget.TextView;
@@ -19,7 +20,7 @@ public final class StartupActivity extends Activity {
     private int panel;
     private int knobs;
     private int text;
-    private LinearLayout root;
+    private FrameLayout root;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -48,18 +49,20 @@ public final class StartupActivity extends Activity {
         knobs = ThemePreferences.knobColor(this);
         text = ThemePreferences.textColor(this);
 
-        root = new LinearLayout(this);
-        root.setOrientation(LinearLayout.VERTICAL);
-        root.setGravity(Gravity.CENTER);
-        root.setPadding(dp(40), dp(20), dp(40), dp(20));
+        root = new FrameLayout(this);
         root.setBackgroundColor(panel);
+
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setGravity(Gravity.CENTER);
+        content.setPadding(dp(40), dp(20), dp(40), dp(20));
 
         TextView mark = new TextView(this);
         mark.setText("●  ●  ●  ●");
         mark.setTextColor(knobs);
         mark.setTextSize(28);
         mark.setGravity(Gravity.CENTER);
-        root.addView(mark, new LinearLayout.LayoutParams(-1, dp(42)));
+        content.addView(mark, new LinearLayout.LayoutParams(-1, dp(42)));
 
         TextView title = new TextView(this);
         title.setText("3RDI ANALOG PERCUSSION");
@@ -67,7 +70,7 @@ public final class StartupActivity extends Activity {
         title.setTextSize(34);
         title.setTypeface(Typeface.create("sans-serif-condensed", Typeface.BOLD));
         title.setGravity(Gravity.CENTER);
-        root.addView(title, new LinearLayout.LayoutParams(-1, dp(52)));
+        content.addView(title, new LinearLayout.LayoutParams(-1, dp(52)));
 
         TextView subtitle = new TextView(this);
         subtitle.setText("DUAL OSCILLATOR • FILTER • MODULATION • 8-STEP PERCUSSION SYNTH");
@@ -75,7 +78,7 @@ public final class StartupActivity extends Activity {
         subtitle.setAlpha(0.72f);
         subtitle.setTextSize(13);
         subtitle.setGravity(Gravity.CENTER);
-        root.addView(subtitle, new LinearLayout.LayoutParams(-1, dp(34)));
+        content.addView(subtitle, new LinearLayout.LayoutParams(-1, dp(34)));
 
         int nativeRate = AudioTrack.getNativeOutputSampleRate(AudioManager.STREAM_MUSIC);
         TextView status = new TextView(this);
@@ -84,10 +87,10 @@ public final class StartupActivity extends Activity {
         status.setAlpha(0.62f);
         status.setTextSize(11);
         status.setGravity(Gravity.CENTER);
-        root.addView(status, new LinearLayout.LayoutParams(-1, dp(32)));
+        content.addView(status, new LinearLayout.LayoutParams(-1, dp(32)));
 
         Space spacer = new Space(this);
-        root.addView(spacer, new LinearLayout.LayoutParams(1, dp(10)));
+        content.addView(spacer, new LinearLayout.LayoutParams(1, dp(10)));
 
         LinearLayout buttons = new LinearLayout(this);
         buttons.setOrientation(LinearLayout.HORIZONTAL);
@@ -101,19 +104,46 @@ public final class StartupActivity extends Activity {
         buttons.addView(start, bp);
         buttons.addView(audio, bp);
         buttons.addView(colours, bp);
-        root.addView(buttons, new LinearLayout.LayoutParams(-1, dp(68)));
+        content.addView(buttons, new LinearLayout.LayoutParams(-1, dp(68)));
 
         TextView footer = new TextView(this);
-        footer.setText("3rdi Analog Percussion v1.5");
+        footer.setText("3rdi Analog Percussion v1.6");
         footer.setTextColor(text);
         footer.setAlpha(0.5f);
         footer.setTextSize(10);
         footer.setGravity(Gravity.CENTER);
-        root.addView(footer, new LinearLayout.LayoutParams(-1, dp(26)));
+        content.addView(footer, new LinearLayout.LayoutParams(-1, dp(26)));
+
+        FrameLayout.LayoutParams cp = new FrameLayout.LayoutParams(-1, -1);
+        cp.gravity = Gravity.CENTER;
+        root.addView(content, cp);
+
+        LinearLayout creatorBar = new LinearLayout(this);
+        creatorBar.setOrientation(LinearLayout.HORIZONTAL);
+        creatorBar.setGravity(Gravity.CENTER_VERTICAL | Gravity.RIGHT);
+
+        TextView creator = new TextView(this);
+        creator.setText("created by Ben Bouchnafa");
+        creator.setTextColor(text);
+        creator.setAlpha(0.68f);
+        creator.setTextSize(10);
+        creator.setGravity(Gravity.CENTER_VERTICAL | Gravity.RIGHT);
+        LinearLayout.LayoutParams creatorParams = new LinearLayout.LayoutParams(-2, dp(36));
+        creatorParams.setMargins(0, 0, dp(9), 0);
+        creatorBar.addView(creator, creatorParams);
+
+        Button exit = makeSmallButton("EXIT");
+        creatorBar.addView(exit, new LinearLayout.LayoutParams(dp(72), dp(34)));
+
+        FrameLayout.LayoutParams creatorBarParams = new FrameLayout.LayoutParams(-2, dp(42));
+        creatorBarParams.gravity = Gravity.RIGHT | Gravity.BOTTOM;
+        creatorBarParams.setMargins(dp(12), dp(12), dp(18), dp(14));
+        root.addView(creatorBar, creatorBarParams);
 
         start.setOnClickListener(v -> startActivity(new Intent(this, MainActivity.class)));
         audio.setOnClickListener(v -> startActivity(new Intent(this, SettingsActivity.class)));
         colours.setOnClickListener(v -> startActivity(new Intent(this, ThemeActivity.class)));
+        exit.setOnClickListener(v -> finishAffinity());
 
         setContentView(root);
     }
@@ -128,6 +158,21 @@ public final class StartupActivity extends Activity {
         b.setAllCaps(false);
         b.setStateListAnimator(null);
         b.setPadding(dp(10), 0, dp(10), 0);
+        return b;
+    }
+
+    private Button makeSmallButton(String value) {
+        Button b = new Button(this);
+        b.setText(value);
+        b.setTextColor(contrast(knobs));
+        b.setTextSize(10);
+        b.setTypeface(Typeface.DEFAULT_BOLD);
+        b.setBackgroundColor(knobs);
+        b.setAllCaps(false);
+        b.setStateListAnimator(null);
+        b.setPadding(dp(6), 0, dp(6), 0);
+        b.setMinWidth(0);
+        b.setMinHeight(0);
         return b;
     }
 
