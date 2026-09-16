@@ -5,21 +5,20 @@ root = Path(__file__).resolve().parent
 main = root / "app/src/main/java/com/threerdi/dfamstyle/MainActivity.java"
 settings = root / "app/src/main/java/com/threerdi/dfamstyle/SettingsActivity.java"
 
-# Build the startup artwork into a real Android drawable. This avoids doing
-# Base64 decoding on the UI thread at app launch.
+# Decode the compact, verified original startup artwork at build time into a
+# real Android drawable. No image decoding or Base64 work occurs at runtime.
 raw_b64 = root / "app/src/main/res/raw/startup_background_b64_v17.txt"
 drawable_dir = root / "app/src/main/res/drawable-nodpi"
 drawable_dir.mkdir(parents=True, exist_ok=True)
 encoded = "".join(raw_b64.read_text().split())
 image_bytes = base64.b64decode(encoded, validate=True)
 if not (image_bytes.startswith(b"\xff\xd8") and image_bytes.endswith(b"\xff\xd9")):
-    raise RuntimeError("startup_background_b64_v17.txt is not a valid JPEG")
-(drawable_dir / "startup_screen_v17.jpg").write_bytes(image_bytes)
+    raise RuntimeError("startup artwork is not a valid JPEG")
+(drawable_dir / "startup_screen_final.jpg").write_bytes(image_bytes)
 
 s = main.read_text()
-
 s = s.replace('        setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);\n        applyScreenPreference();','        setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);\n        UiUtil.applyImmersive(this);\n        applyScreenPreference();')
-s = s.replace('        synthView = new SynthView(this);\n        setContentView(synthView);','        synthView = new SynthView(this);\n        setContentView(synthView);\n        if (getIntent().getBooleanExtra("open_presets", false)) {\n            synthView.post(() -> synthView.showPresetMenu());\n        }')
+s = s.replace('        synthView = new SynthView(this);\n        setContentView(synthView);','        synthView = new SynthView(this);\n        setContentView(synthView);\n        if (getIntent().getBooleanExtra("open_presets", false)) { synthView.post(() -> synthView.showPresetMenu()); }')
 s = s.replace('        super.onResume();\n        applyScreenPreference();\n        if (synthView != null) synthView.startAudio();','        super.onResume();\n        UiUtil.applyImmersive(this);\n        applyScreenPreference();\n        if (synthView != null) { synthView.reloadTheme(); synthView.startAudio(); }')
 s = s.replace('    @Override\n    protected void onPause() {','    @Override\n    public void onWindowFocusChanged(boolean hasFocus) { super.onWindowFocusChanged(hasFocus); if (hasFocus) UiUtil.applyImmersive(this); }\n\n    @Override\n    protected void onPause() {')
 s = s.replace('        private static final int SAND = Color.rgb(218, 198, 165);\n        private static final int SAND_LIGHT = Color.rgb(229, 213, 188);\n        private static final int SAND_DARK = Color.rgb(188, 164, 128);\n        private static final int ORANGE = Color.rgb(224, 111, 36);\n        private static final int ORANGE_DARK = Color.rgb(187, 79, 22);\n        private static final int BLACK = Color.rgb(18, 18, 16);','        private int SAND; private int SAND_LIGHT; private int SAND_DARK; private int ORANGE; private int ORANGE_DARK; private int BLACK;')
@@ -29,7 +28,6 @@ s = s.replace('            super.onDraw(canvas);\n            canvasScale = Math
 s = s.replace('            p.setStyle(Paint.Style.FILL);\n            p.setColor(SAND_DARK);\n            canvas.drawRoundRect(new RectF(14, 14, 1186, 706), 22, 22, p);\n            p.setColor(SAND);\n            canvas.drawRoundRect(new RectF(28, 28, 1172, 692), 17, 17, p);\n            p.setColor(SAND_LIGHT);\n            canvas.drawRoundRect(new RectF(45, 45, 1155, 675), 12, 12, p);','            p.setStyle(Paint.Style.FILL); p.setColor(SAND); canvas.drawRect(0,0,DW,DH,p); p.setColor(SAND_LIGHT); canvas.drawRoundRect(new RectF(24,24,1176,696),16,16,p);')
 s = s.replace('            c.drawText("DUAL OSCILLATOR / FILTER / MODULATION / 8-STEP PERCUSSION SYNTH", 68, 111, p);\n            drawButton(c, prefsRect, "PREFERENCES", false);','            c.drawText("DUAL OSCILLATOR / FILTER / MODULATION / 8-STEP PERCUSSION SYNTH", 68, 111, p);\n            drawButton(c,presetRect,"PRESETS",false); drawButton(c,colorsRect,"COLOURS",false); drawButton(c,prefsRect,"AUDIO",false);')
 s = s.replace('                if (prefsRect.contains(x, y)) {\n                    getContext().startActivity(new Intent(getContext(), SettingsActivity.class));\n                    return true;\n                }','                if (presetRect.contains(x,y)) { showPresetMenu(); return true; }\n                if (colorsRect.contains(x,y)) { getContext().startActivity(new Intent(getContext(),ThemeActivity.class)); return true; }\n                if (prefsRect.contains(x,y)) { getContext().startActivity(new Intent(getContext(),SettingsActivity.class)); return true; }')
-
 methods = r'''
         private void showPresetMenu() {
             String[] items={"SAVE CURRENT PRESET","LOAD PRESET"};
@@ -60,4 +58,4 @@ methods = r'''
 s=s.replace('        private void drawStep(Canvas c, int index, float x, boolean active) {',methods+'        private void drawStep(Canvas c, int index, float x, boolean active) {')
 main.write_text(s)
 q=settings.read_text();q=q.replace('        setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);','        setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);\n        UiUtil.applyImmersive(this);',1);q=q.replace('    private void loadValues() {','    @Override\n    public void onWindowFocusChanged(boolean hasFocus){super.onWindowFocusChanged(hasFocus);if(hasFocus)UiUtil.applyImmersive(this);}\n\n    private void loadValues() {',1);settings.write_text(q)
-print("Applied fullscreen/theme/preset patch and generated startup drawable")
+print("Applied v2.0 integration and generated verified startup drawable")
