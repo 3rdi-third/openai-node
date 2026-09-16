@@ -1,8 +1,20 @@
 from pathlib import Path
+import base64
 
 root = Path(__file__).resolve().parent
 main = root / "app/src/main/java/com/threerdi/dfamstyle/MainActivity.java"
 settings = root / "app/src/main/java/com/threerdi/dfamstyle/SettingsActivity.java"
+
+# Build the startup artwork into a real Android drawable. This avoids doing
+# Base64 decoding on the UI thread at app launch.
+raw_b64 = root / "app/src/main/res/raw/startup_background_b64_v17.txt"
+drawable_dir = root / "app/src/main/res/drawable-nodpi"
+drawable_dir.mkdir(parents=True, exist_ok=True)
+encoded = "".join(raw_b64.read_text().split())
+image_bytes = base64.b64decode(encoded, validate=True)
+if not (image_bytes.startswith(b"\xff\xd8") and image_bytes.endswith(b"\xff\xd9")):
+    raise RuntimeError("startup_background_b64_v17.txt is not a valid JPEG")
+(drawable_dir / "startup_screen_v17.jpg").write_bytes(image_bytes)
 
 s = main.read_text()
 
@@ -48,4 +60,4 @@ methods = r'''
 s=s.replace('        private void drawStep(Canvas c, int index, float x, boolean active) {',methods+'        private void drawStep(Canvas c, int index, float x, boolean active) {')
 main.write_text(s)
 q=settings.read_text();q=q.replace('        setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);','        setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);\n        UiUtil.applyImmersive(this);',1);q=q.replace('    private void loadValues() {','    @Override\n    public void onWindowFocusChanged(boolean hasFocus){super.onWindowFocusChanged(hasFocus);if(hasFocus)UiUtil.applyImmersive(this);}\n\n    private void loadValues() {',1);settings.write_text(q)
-print("Applied fullscreen/theme/preset patch")
+print("Applied fullscreen/theme/preset patch and generated startup drawable")
