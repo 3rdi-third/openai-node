@@ -44,7 +44,7 @@ public final class StartupActivity extends Activity {
             addView(background, new FrameLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
 
             versionLabel = new TextView(StartupActivity.this);
-            versionLabel.setText("v2.1");
+            versionLabel.setText("v2.2");
             versionLabel.setTextColor(Color.rgb(241, 224, 184));
             versionLabel.setBackgroundColor(Color.rgb(5, 5, 7));
             versionLabel.setTextSize(9f);
