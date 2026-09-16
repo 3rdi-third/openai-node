@@ -42,5 +42,100 @@ if old_canvas not in s:
     raise RuntimeError("Could not find v2.1 onDraw entry in MainActivity")
 s = s.replace(old_canvas, new_canvas, 1)
 
+old_engine_fields = '''        private int step = 0;
+
+        SynthEngine(SynthView synthView) {'''
+new_engine_fields = '''        private int step = 0;
+        private long lastExternalClockCount = -1L;
+        private long lastExternalStepBoundary = -1L;
+        private boolean lastExternalRunning = false;
+
+        SynthEngine(SynthView synthView) {'''
+if old_engine_fields not in s:
+    raise RuntimeError("Could not find SynthEngine step field")
+s = s.replace(old_engine_fields, new_engine_fields, 1)
+
+old_render_head = '''        private void render(short[] out) {
+            float ampDecay = decayCoeff(s.vcaDecay);
+            float filtDecay = decayCoeff(s.vcfDecay);
+
+            for (int i = 0; i < out.length; i++) {'''
+new_render_head = '''        private void render(short[] out) {
+            float ampDecay = decayCoeff(s.vcaDecay);
+            float filtDecay = decayCoeff(s.vcfDecay);
+
+            BleMidiSyncManager midiClock = BleMidiSyncManager.get(s.getContext());
+            boolean externalClockMode = midiClock.isSlaveActive() && midiClock.hasIncomingClock();
+            boolean externalRunning = externalClockMode && midiClock.isIncomingRunning();
+            long externalClockCount = externalClockMode ? midiClock.getIncomingClockCount() : -1L;
+
+            if (externalClockMode) {
+                float externalBpm = midiClock.getIncomingBpm();
+                if (externalBpm >= 20f && externalBpm <= 300f) s.tempo = externalBpm;
+                s.running = externalRunning;
+
+                if (externalRunning && !lastExternalRunning) {
+                    // MIDI Start: fire step 1 immediately and establish phase zero.
+                    step = 0;
+                    currentStep = 0;
+                    trigger(0);
+                    step = 1;
+                    samplesToNextStep = 0.0;
+                    lastExternalStepBoundary = externalClockCount / 12L;
+                    lastExternalClockCount = externalClockCount;
+                } else if (externalRunning) {
+                    long boundary = externalClockCount / 12L;
+                    if (lastExternalStepBoundary < 0L) lastExternalStepBoundary = boundary;
+                    if (boundary > lastExternalStepBoundary) {
+                        long stepsDue = Math.min(8L, boundary - lastExternalStepBoundary);
+                        for (long n = 0; n < stepsDue; n++) {
+                            currentStep = step;
+                            if (n == stepsDue - 1L) trigger(step);
+                            step = (step + 1) & 7;
+                        }
+                        lastExternalStepBoundary = boundary;
+                    }
+                    lastExternalClockCount = externalClockCount;
+                } else if (lastExternalRunning) {
+                    currentStep = -1;
+                }
+                lastExternalRunning = externalRunning;
+            } else {
+                lastExternalRunning = false;
+                lastExternalClockCount = -1L;
+                lastExternalStepBoundary = -1L;
+            }
+
+            for (int i = 0; i < out.length; i++) {'''
+if old_render_head not in s:
+    raise RuntimeError("Could not find SynthEngine render head")
+s = s.replace(old_render_head, new_render_head, 1)
+
+old_internal_clock = '''                if (s.running) {
+                    if (samplesToNextStep <= 0.0) {
+                        currentStep = step;
+                        trigger(step);
+                        step = (step + 1) & 7;
+                        double bpm = Math.max(40.0, Math.min(300.0, s.tempo));
+                        samplesToNextStep += sampleRate * 60.0 / bpm / 2.0;
+                    }
+                    samplesToNextStep -= 1.0;
+                }
+'''
+new_internal_clock = '''                if (s.running && !externalClockMode) {
+                    if (samplesToNextStep <= 0.0) {
+                        currentStep = step;
+                        trigger(step);
+                        step = (step + 1) & 7;
+                        double bpm = Math.max(40.0, Math.min(300.0, s.tempo));
+                        samplesToNextStep += sampleRate * 60.0 / bpm / 2.0;
+                    }
+                    samplesToNextStep -= 1.0;
+                }
+'''
+if old_internal_clock not in s:
+    raise RuntimeError("Could not find internal sequencer timing block")
+s = s.replace(old_internal_clock, new_internal_clock, 1)
+
 main.write_text(s)
-print("Applied v2.2 BLE MIDI synth integration")
+print("Applied v2.6 BLE MIDI timestamp + phase-lock synth integration")
