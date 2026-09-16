@@ -26,8 +26,10 @@ import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.ParcelUuid;
+import android.os.SystemClock;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -38,14 +40,28 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.LockSupport;
 
 /**
- * Small BLE-MIDI transport focused on MIDI Clock (24 PPQN) and transport.
- * MASTER advertises the standard BLE-MIDI service and sends Clock/Start/Stop.
- * SLAVE scans for a BLE-MIDI peripheral and follows incoming Clock/Start/Stop.
+ * BLE-MIDI transport for MIDI Clock and transport.
+ *
+ * v2.6 timing model:
+ * - MASTER batches 3 MIDI Clock events per BLE notification. This reduces the
+ *   BLE notification rate by 3x while preserving all 24 PPQN events.
+ * - Each Clock event carries its own BLE-MIDI timestamp.
+ * - SLAVE derives tempo from the sender timestamps, not Bluetooth callback
+ *   arrival time, so BLE scheduling jitter does not become tempo jitter.
+ * - Missing packets are inferred from timestamp gaps and the logical MIDI
+ *   clock counter advances accordingly, keeping musical phase much tighter.
  */
 public final class BleMidiSyncManager {
     public static final UUID MIDI_SERVICE_UUID = UUID.fromString("03B80E5A-EDE8-4B33-A751-6CE34EC4C700");
     public static final UUID MIDI_CHAR_UUID = UUID.fromString("7772E5DB-3868-4112-A1A9-F2669D106BF3");
     private static final UUID CCCD_UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb");
+
+    private static final int MIDI_CLOCK = 0xF8;
+    private static final int MIDI_START = 0xFA;
+    private static final int MIDI_CONTINUE = 0xFB;
+    private static final int MIDI_STOP = 0xFC;
+    private static final int CLOCKS_PER_BATCH = 3;
+    private static final int TIMESTAMP_MODULO = 8192;
 
     public static final int MODE_OFF = 0;
     public static final int MODE_MASTER = 1;
@@ -81,10 +97,13 @@ public final class BleMidiSyncManager {
     private volatile String status = "MIDI sync off";
     private volatile float masterBpm = 133f;
     private volatile boolean masterRunning = false;
+
     private volatile float incomingBpm = 0f;
     private volatile boolean incomingRunning = false;
     private volatile long lastIncomingClockNs = 0L;
-    private volatile double avgClockIntervalNs = 0.0;
+    private volatile double avgClockIntervalMs = 0.0;
+    private volatile int lastRemoteTimestamp13 = -1;
+    private volatile long incomingClockCount = 0L;
     private volatile long syncRevision = 0L;
 
     private BluetoothGattServer gattServer;
@@ -121,21 +140,23 @@ public final class BleMidiSyncManager {
     public String getStatus() { return status; }
     public float getIncomingBpm() { return incomingBpm; }
     public boolean isIncomingRunning() { return incomingRunning; }
+    public long getIncomingClockCount() { return incomingClockCount; }
     public long getSyncRevision() { return syncRevision; }
-    public boolean hasIncomingClock() { return lastIncomingClockNs != 0L && (System.nanoTime() - lastIncomingClockNs) < 2_000_000_000L; }
 
-    public boolean isBluetoothAvailable() {
-        return adapter != null;
+    public boolean hasIncomingClock() {
+        return lastIncomingClockNs != 0L
+                && (System.nanoTime() - lastIncomingClockNs) < 2_000_000_000L;
     }
 
-    public boolean isBluetoothEnabled() {
-        return adapter != null && adapter.isEnabled();
-    }
+    public boolean isBluetoothAvailable() { return adapter != null; }
+    public boolean isBluetoothEnabled() { return adapter != null && adapter.isEnabled(); }
 
     @SuppressLint("MissingPermission")
     public boolean canAdvertise() {
         try {
-            return adapter != null && adapter.isMultipleAdvertisementSupported() && adapter.getBluetoothLeAdvertiser() != null;
+            return adapter != null
+                    && adapter.isMultipleAdvertisementSupported()
+                    && adapter.getBluetoothLeAdvertiser() != null;
         } catch (SecurityException e) {
             return false;
         }
@@ -146,11 +167,11 @@ public final class BleMidiSyncManager {
     }
 
     public void setMasterState(float bpm, boolean running) {
-        masterBpm = Math.max(20f, Math.min(300f, bpm));
+        masterBpm = clampBpm(bpm);
         boolean changed = masterRunning != running;
         masterRunning = running;
         if (mode == MODE_MASTER && changed) {
-            sendMidiRealtime(running ? (byte) 0xFA : (byte) 0xFC);
+            sendMidiRealtime((byte) (running ? MIDI_START : MIDI_STOP));
         }
     }
 
@@ -159,10 +180,9 @@ public final class BleMidiSyncManager {
         stopSlaveInternal();
         stopMasterInternal();
         mode = MODE_MASTER;
-        masterBpm = Math.max(20f, Math.min(300f, bpm));
+        masterBpm = clampBpm(bpm);
         masterRunning = running;
-        incomingBpm = 0f;
-        lastIncomingClockNs = 0L;
+        resetIncomingClockState();
 
         if (adapter == null) {
             setStatus("Bluetooth is not available on this device");
@@ -172,6 +192,7 @@ public final class BleMidiSyncManager {
             setStatus("Enable Bluetooth first");
             return;
         }
+
         try {
             advertiser = adapter.getBluetoothLeAdvertiser();
             if (advertiser == null || !adapter.isMultipleAdvertisementSupported()) {
@@ -185,17 +206,21 @@ public final class BleMidiSyncManager {
                 return;
             }
 
-            BluetoothGattService service = new BluetoothGattService(MIDI_SERVICE_UUID, BluetoothGattService.SERVICE_TYPE_PRIMARY);
+            BluetoothGattService service = new BluetoothGattService(
+                    MIDI_SERVICE_UUID, BluetoothGattService.SERVICE_TYPE_PRIMARY);
             serverCharacteristic = new BluetoothGattCharacteristic(
                     MIDI_CHAR_UUID,
-                    BluetoothGattCharacteristic.PROPERTY_READ |
-                            BluetoothGattCharacteristic.PROPERTY_WRITE |
-                            BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE |
-                            BluetoothGattCharacteristic.PROPERTY_NOTIFY,
-                    BluetoothGattCharacteristic.PERMISSION_READ | BluetoothGattCharacteristic.PERMISSION_WRITE);
+                    BluetoothGattCharacteristic.PROPERTY_READ
+                            | BluetoothGattCharacteristic.PROPERTY_WRITE
+                            | BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE
+                            | BluetoothGattCharacteristic.PROPERTY_NOTIFY,
+                    BluetoothGattCharacteristic.PERMISSION_READ
+                            | BluetoothGattCharacteristic.PERMISSION_WRITE);
+
             BluetoothGattDescriptor cccd = new BluetoothGattDescriptor(
                     CCCD_UUID,
-                    BluetoothGattDescriptor.PERMISSION_READ | BluetoothGattDescriptor.PERMISSION_WRITE);
+                    BluetoothGattDescriptor.PERMISSION_READ
+                            | BluetoothGattDescriptor.PERMISSION_WRITE);
             serverCharacteristic.addDescriptor(cccd);
             service.addCharacteristic(serverCharacteristic);
             gattServer.addService(service);
@@ -232,9 +257,7 @@ public final class BleMidiSyncManager {
         stopMasterInternal();
         stopSlaveInternal();
         mode = MODE_SLAVE;
-        incomingBpm = 0f;
-        lastIncomingClockNs = 0L;
-        avgClockIntervalNs = 0.0;
+        resetIncomingClockState();
         synchronized (this) { scannedDevices.clear(); }
         notifyDevices();
 
@@ -246,14 +269,19 @@ public final class BleMidiSyncManager {
             setStatus("Enable Bluetooth first");
             return;
         }
+
         try {
             scanner = adapter.getBluetoothLeScanner();
             if (scanner == null) {
                 setStatus("BLE scanner unavailable");
                 return;
             }
-            ScanFilter filter = new ScanFilter.Builder().setServiceUuid(new ParcelUuid(MIDI_SERVICE_UUID)).build();
-            ScanSettings settings = new ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY).build();
+            ScanFilter filter = new ScanFilter.Builder()
+                    .setServiceUuid(new ParcelUuid(MIDI_SERVICE_UUID))
+                    .build();
+            ScanSettings settings = new ScanSettings.Builder()
+                    .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
+                    .build();
             scanner.startScan(java.util.Collections.singletonList(filter), settings, scanCallback);
             setStatus("Scanning for BLE MIDI devices…");
         } catch (SecurityException e) {
@@ -266,9 +294,11 @@ public final class BleMidiSyncManager {
         if (device == null) return;
         stopScanOnly();
         mode = MODE_SLAVE;
+        resetIncomingClockState();
         try {
             setStatus("Connecting to " + displayName(device) + "…");
-            clientGatt = device.connectGatt(context, false, clientCallback, BluetoothDevice.TRANSPORT_LE);
+            clientGatt = device.connectGatt(
+                    context, false, clientCallback, BluetoothDevice.TRANSPORT_LE);
         } catch (SecurityException e) {
             setStatus("Bluetooth connect permission required");
         }
@@ -278,13 +308,19 @@ public final class BleMidiSyncManager {
         stopMasterInternal();
         stopSlaveInternal();
         mode = MODE_OFF;
-        incomingBpm = 0f;
-        incomingRunning = false;
-        lastIncomingClockNs = 0L;
-        avgClockIntervalNs = 0.0;
+        resetIncomingClockState();
         syncRevision++;
         setStatus("MIDI sync off");
         notifySync();
+    }
+
+    private void resetIncomingClockState() {
+        incomingBpm = 0f;
+        incomingRunning = false;
+        lastIncomingClockNs = 0L;
+        avgClockIntervalMs = 0.0;
+        lastRemoteTimestamp13 = -1;
+        incomingClockCount = 0L;
     }
 
     @SuppressLint("MissingPermission")
@@ -326,22 +362,48 @@ public final class BleMidiSyncManager {
         scanner = null;
     }
 
+    /**
+     * Wake at every MIDI-clock instant but only transmit once every 3 clocks.
+     * 133 BPM therefore uses ~17.7 BLE notifications/s instead of ~53.2/s.
+     * All three F8 events remain present in the BLE-MIDI packet.
+     */
     private void startClockThread() {
         if (clockThreadActive.getAndSet(true)) return;
         clockThread = new Thread(() -> {
             long next = System.nanoTime();
+            long[] batchTimestampsMs = new long[CLOCKS_PER_BATCH];
+            int batchCount = 0;
+            boolean wasRunning = false;
+
             while (clockThreadActive.get()) {
                 if (mode != MODE_MASTER || !masterRunning) {
                     next = System.nanoTime();
-                    LockSupport.parkNanos(5_000_000L);
+                    batchCount = 0;
+                    wasRunning = false;
+                    LockSupport.parkNanos(3_000_000L);
                     continue;
                 }
-                long period = (long) (60_000_000_000.0 / (Math.max(20f, masterBpm) * 24.0));
-                next += period;
-                sendMidiRealtime((byte) 0xF8);
+
+                if (!wasRunning) {
+                    next = System.nanoTime();
+                    batchCount = 0;
+                    wasRunning = true;
+                }
+
+                long periodNs = (long) (60_000_000_000.0
+                        / (Math.max(20f, masterBpm) * 24.0));
+                next += periodNs;
                 long wait = next - System.nanoTime();
-                if (wait > 0) LockSupport.parkNanos(wait);
-                else next = System.nanoTime();
+                if (wait > 0L) LockSupport.parkNanos(wait);
+                else if (wait < -periodNs * 2L) next = System.nanoTime();
+
+                if (!clockThreadActive.get() || !masterRunning) continue;
+                batchTimestampsMs[batchCount++] = SystemClock.elapsedRealtime();
+
+                if (batchCount >= CLOCKS_PER_BATCH) {
+                    sendMidiClockBatch(batchTimestampsMs, batchCount);
+                    batchCount = 0;
+                }
             }
         }, "BLE-MIDI-Clock");
         clockThread.setDaemon(true);
@@ -349,11 +411,13 @@ public final class BleMidiSyncManager {
     }
 
     @SuppressLint("MissingPermission")
-    private void sendMidiRealtime(byte midiByte) {
+    private void sendMidiClockBatch(long[] timestampsMs, int count) {
+        if (count <= 0) return;
         BluetoothGattServer server = gattServer;
         BluetoothGattCharacteristic characteristic = serverCharacteristic;
         if (server == null || characteristic == null || subscribers.isEmpty()) return;
-        byte[] packet = bleMidiPacket(midiByte);
+
+        byte[] packet = bleMidiClockBatchPacket(timestampsMs, count);
         for (BluetoothDevice device : subscribers) {
             try {
                 if (Build.VERSION.SDK_INT >= 33) {
@@ -366,8 +430,26 @@ public final class BleMidiSyncManager {
         }
     }
 
-    private static byte[] bleMidiPacket(byte midiByte) {
-        int ts = (int) (System.currentTimeMillis() & 0x1FFF);
+    @SuppressLint("MissingPermission")
+    private void sendMidiRealtime(byte midiByte) {
+        BluetoothGattServer server = gattServer;
+        BluetoothGattCharacteristic characteristic = serverCharacteristic;
+        if (server == null || characteristic == null || subscribers.isEmpty()) return;
+        byte[] packet = bleMidiRealtimePacket(midiByte);
+        for (BluetoothDevice device : subscribers) {
+            try {
+                if (Build.VERSION.SDK_INT >= 33) {
+                    server.notifyCharacteristicChanged(device, characteristic, false, packet);
+                } else {
+                    characteristic.setValue(packet);
+                    server.notifyCharacteristicChanged(device, characteristic, false);
+                }
+            } catch (Exception ignored) { }
+        }
+    }
+
+    private static byte[] bleMidiRealtimePacket(byte midiByte) {
+        int ts = (int) (SystemClock.elapsedRealtime() & 0x1FFF);
         return new byte[] {
                 (byte) (0x80 | ((ts >> 7) & 0x3F)),
                 (byte) (0x80 | (ts & 0x7F)),
@@ -375,38 +457,149 @@ public final class BleMidiSyncManager {
         };
     }
 
+    private static byte[] bleMidiClockBatchPacket(long[] timestampsMs, int count) {
+        int safeCount = Math.max(1, Math.min(CLOCKS_PER_BATCH, count));
+        int firstTs = (int) (timestampsMs[0] & 0x1FFF);
+        byte[] packet = new byte[1 + safeCount * 2];
+        packet[0] = (byte) (0x80 | ((firstTs >> 7) & 0x3F));
+        int p = 1;
+        for (int i = 0; i < safeCount; i++) {
+            int ts = (int) (timestampsMs[i] & 0x1FFF);
+            packet[p++] = (byte) (0x80 | (ts & 0x7F));
+            packet[p++] = (byte) MIDI_CLOCK;
+        }
+        return packet;
+    }
+
+    /** Parse timestamped real-time messages from a BLE-MIDI packet. */
     private void parseBleMidi(byte[] value) {
-        if (value == null) return;
-        for (byte raw : value) {
-            int b = raw & 0xFF;
-            if (b == 0xF8) handleClock();
-            else if (b == 0xFA || b == 0xFB) {
-                incomingRunning = true;
-                syncRevision++;
-                notifySync();
-            } else if (b == 0xFC) {
-                incomingRunning = false;
-                syncRevision++;
-                notifySync();
+        if (value == null || value.length == 0) return;
+
+        int index = 0;
+        int headerHigh = 0;
+        if ((value[0] & 0x80) != 0) {
+            headerHigh = value[0] & 0x3F;
+            index = 1;
+        }
+
+        int timestampHigh = headerHigh;
+        int previousLow = -1;
+
+        while (index < value.length) {
+            int b = value[index] & 0xFF;
+
+            // Standard BLE-MIDI real-time pair: timestamp-low, realtime-status.
+            if ((b & 0x80) != 0 && index + 1 < value.length) {
+                int next = value[index + 1] & 0xFF;
+                if (isRealtime(next)) {
+                    int low = b & 0x7F;
+                    if (previousLow >= 0 && low < previousLow
+                            && previousLow - low > 64) {
+                        timestampHigh = (timestampHigh + 1) & 0x3F;
+                    }
+                    previousLow = low;
+                    int timestamp13 = ((timestampHigh & 0x3F) << 7) | low;
+                    handleRealtime(next, timestamp13);
+                    index += 2;
+                    continue;
+                }
             }
+
+            // Fallback for senders that omit a fresh timestamp before realtime.
+            if (isRealtime(b)) handleRealtime(b, -1);
+            index++;
         }
     }
 
-    private void handleClock() {
-        long now = System.nanoTime();
-        long last = lastIncomingClockNs;
-        lastIncomingClockNs = now;
-        if (last != 0L) {
-            long dt = now - last;
-            if (dt > 4_000_000L && dt < 150_000_000L) {
-                if (avgClockIntervalNs == 0.0) avgClockIntervalNs = dt;
-                else avgClockIntervalNs = avgClockIntervalNs * 0.90 + dt * 0.10;
-                float bpm = (float) (60_000_000_000.0 / (avgClockIntervalNs * 24.0));
-                if (bpm >= 20f && bpm <= 300f) incomingBpm = bpm;
+    private static boolean isRealtime(int b) {
+        return b == MIDI_CLOCK || b == MIDI_START || b == MIDI_CONTINUE || b == MIDI_STOP;
+    }
+
+    private void handleRealtime(int statusByte, int timestamp13) {
+        if (statusByte == MIDI_CLOCK) {
+            handleClock(timestamp13);
+            return;
+        }
+        if (statusByte == MIDI_START) {
+            incomingRunning = true;
+            incomingClockCount = 0L;
+            lastRemoteTimestamp13 = -1;
+            avgClockIntervalMs = 0.0;
+            syncRevision++;
+            notifySync();
+        } else if (statusByte == MIDI_CONTINUE) {
+            incomingRunning = true;
+            syncRevision++;
+            notifySync();
+        } else if (statusByte == MIDI_STOP) {
+            incomingRunning = false;
+            syncRevision++;
+            notifySync();
+        }
+    }
+
+    /**
+     * Reconstruct MIDI Clock from remote BLE timestamps. The Bluetooth callback
+     * time is used only to detect connection timeout; it is never used as the
+     * tempo source when a sender timestamp is available.
+     */
+    private synchronized void handleClock(int timestamp13) {
+        long nowNs = System.nanoTime();
+        lastIncomingClockNs = nowNs;
+        int pulseSpan = 1;
+
+        if (timestamp13 >= 0) {
+            int lastTs = lastRemoteTimestamp13;
+            if (lastTs >= 0) {
+                int deltaMs = timestamp13 - lastTs;
+                if (deltaMs <= 0) deltaMs += TIMESTAMP_MODULO;
+
+                if (deltaMs > 0 && deltaMs < 1000) {
+                    double normalizedMs = deltaMs;
+                    if (avgClockIntervalMs > 0.0) {
+                        pulseSpan = (int) Math.round(deltaMs / avgClockIntervalMs);
+                        if (pulseSpan < 1) pulseSpan = 1;
+                        if (pulseSpan > 24) pulseSpan = 24;
+                        normalizedMs = deltaMs / (double) pulseSpan;
+
+                        // Reject grossly inconsistent timing, but allow normal
+                        // 1 ms quantisation and modest BLE timestamp jitter.
+                        double ratio = normalizedMs / avgClockIntervalMs;
+                        if (ratio >= 0.60 && ratio <= 1.65) {
+                            avgClockIntervalMs = avgClockIntervalMs * 0.86
+                                    + normalizedMs * 0.14;
+                        }
+                    } else if (deltaMs >= 5 && deltaMs <= 125) {
+                        avgClockIntervalMs = deltaMs;
+                    }
+                }
+            }
+            lastRemoteTimestamp13 = timestamp13;
+        } else {
+            // Compatibility fallback for non-timestamped realtime messages.
+            // This path is deliberately slow-smoothed because BLE callback
+            // arrival timing is not a reliable musical clock.
+            if (lastIncomingClockNs != 0L && avgClockIntervalMs <= 0.0) {
+                // No-op: wait for timestamped packets before claiming a BPM.
             }
         }
+
+        incomingClockCount += pulseSpan;
+
+        if (avgClockIntervalMs > 0.0) {
+            float bpm = (float) (60_000.0 / (avgClockIntervalMs * 24.0));
+            if (bpm >= 20f && bpm <= 300f) {
+                if (incomingBpm <= 0f) incomingBpm = bpm;
+                else incomingBpm = incomingBpm * 0.80f + bpm * 0.20f;
+            }
+        }
+
         syncRevision++;
-        if ((syncRevision & 3L) == 0L) notifySync();
+        if ((incomingClockCount % 6L) == 0L) notifySync();
+    }
+
+    private static float clampBpm(float bpm) {
+        return Math.max(20f, Math.min(300f, bpm));
     }
 
     private void setStatus(String newStatus) {
@@ -451,8 +644,11 @@ public final class BleMidiSyncManager {
 
     private final AdvertiseCallback advertiseCallback = new AdvertiseCallback() {
         @Override public void onStartSuccess(AdvertiseSettings settingsInEffect) {
-            setStatus(subscribers.isEmpty() ? "MASTER • advertising BLE MIDI • waiting for connection" : "MASTER • connected");
+            setStatus(subscribers.isEmpty()
+                    ? "MASTER • advertising BLE MIDI • waiting for connection"
+                    : "MASTER • connected");
         }
+
         @Override public void onStartFailure(int errorCode) {
             setStatus("BLE MIDI advertising failed (" + errorCode + ")");
         }
@@ -460,11 +656,16 @@ public final class BleMidiSyncManager {
 
     private final BluetoothGattServerCallback serverCallback = new BluetoothGattServerCallback() {
         @Override public void onServiceAdded(int statusCode, BluetoothGattService service) {
-            if (statusCode == BluetoothGatt.GATT_SUCCESS && MIDI_SERVICE_UUID.equals(service.getUuid())) beginAdvertising();
-            else setStatus("Could not publish BLE MIDI service");
+            if (statusCode == BluetoothGatt.GATT_SUCCESS
+                    && MIDI_SERVICE_UUID.equals(service.getUuid())) {
+                beginAdvertising();
+            } else {
+                setStatus("Could not publish BLE MIDI service");
+            }
         }
 
-        @Override public void onConnectionStateChange(BluetoothDevice device, int statusCode, int newState) {
+        @Override public void onConnectionStateChange(
+                BluetoothDevice device, int statusCode, int newState) {
             if (newState == BluetoothProfile.STATE_CONNECTED) {
                 setStatus("MASTER • connected to " + displayName(device));
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
@@ -474,36 +675,57 @@ public final class BleMidiSyncManager {
         }
 
         @SuppressLint("MissingPermission")
-        @Override public void onDescriptorReadRequest(BluetoothDevice device, int requestId, int offset, BluetoothGattDescriptor descriptor) {
+        @Override public void onDescriptorReadRequest(
+                BluetoothDevice device, int requestId, int offset,
+                BluetoothGattDescriptor descriptor) {
             if (gattServer == null) return;
-            byte[] value = subscribers.contains(device) ? BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE : BluetoothGattDescriptor.DISABLE_NOTIFICATION_VALUE;
-            gattServer.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, offset, value);
+            byte[] value = subscribers.contains(device)
+                    ? BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+                    : BluetoothGattDescriptor.DISABLE_NOTIFICATION_VALUE;
+            gattServer.sendResponse(
+                    device, requestId, BluetoothGatt.GATT_SUCCESS, offset, value);
         }
 
         @SuppressLint("MissingPermission")
-        @Override public void onDescriptorWriteRequest(BluetoothDevice device, int requestId, BluetoothGattDescriptor descriptor,
-                                                       boolean preparedWrite, boolean responseNeeded, int offset, byte[] value) {
+        @Override public void onDescriptorWriteRequest(
+                BluetoothDevice device, int requestId,
+                BluetoothGattDescriptor descriptor, boolean preparedWrite,
+                boolean responseNeeded, int offset, byte[] value) {
             if (CCCD_UUID.equals(descriptor.getUuid())) {
-                boolean enabled = java.util.Arrays.equals(value, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE);
+                boolean enabled = Arrays.equals(
+                        value, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE);
                 if (enabled) subscribers.add(device); else subscribers.remove(device);
                 descriptor.setValue(value);
-                if (enabled && masterRunning) sendMidiRealtime((byte) 0xFA);
-                setStatus(enabled ? "MASTER • MIDI Clock connected to " + displayName(device) : "MASTER • connection present, notifications off");
+                if (enabled && masterRunning) sendMidiRealtime((byte) MIDI_START);
+                setStatus(enabled
+                        ? "MASTER • MIDI Clock connected to " + displayName(device)
+                        : "MASTER • connection present, notifications off");
             }
-            if (responseNeeded && gattServer != null) gattServer.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, offset, value);
+            if (responseNeeded && gattServer != null) {
+                gattServer.sendResponse(
+                        device, requestId, BluetoothGatt.GATT_SUCCESS, offset, value);
+            }
         }
 
         @SuppressLint("MissingPermission")
-        @Override public void onCharacteristicReadRequest(BluetoothDevice device, int requestId, int offset, BluetoothGattCharacteristic characteristic) {
+        @Override public void onCharacteristicReadRequest(
+                BluetoothDevice device, int requestId, int offset,
+                BluetoothGattCharacteristic characteristic) {
             if (gattServer == null) return;
-            gattServer.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, offset, new byte[0]);
+            gattServer.sendResponse(
+                    device, requestId, BluetoothGatt.GATT_SUCCESS, offset, new byte[0]);
         }
 
         @SuppressLint("MissingPermission")
-        @Override public void onCharacteristicWriteRequest(BluetoothDevice device, int requestId, BluetoothGattCharacteristic characteristic,
-                                                           boolean preparedWrite, boolean responseNeeded, int offset, byte[] value) {
+        @Override public void onCharacteristicWriteRequest(
+                BluetoothDevice device, int requestId,
+                BluetoothGattCharacteristic characteristic, boolean preparedWrite,
+                boolean responseNeeded, int offset, byte[] value) {
             parseBleMidi(value);
-            if (responseNeeded && gattServer != null) gattServer.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, offset, value);
+            if (responseNeeded && gattServer != null) {
+                gattServer.sendResponse(
+                        device, requestId, BluetoothGatt.GATT_SUCCESS, offset, value);
+            }
         }
     };
 
@@ -514,7 +736,8 @@ public final class BleMidiSyncManager {
             synchronized (BleMidiSyncManager.this) {
                 scannedDevices.put(device.getAddress(), device);
             }
-            setStatus("SLAVE • found " + getScannedDevices().size() + " BLE MIDI device(s)");
+            setStatus("SLAVE • found " + getScannedDevices().size()
+                    + " BLE MIDI device(s)");
             notifyDevices();
         }
 
@@ -525,7 +748,8 @@ public final class BleMidiSyncManager {
 
     private final BluetoothGattCallback clientCallback = new BluetoothGattCallback() {
         @SuppressLint("MissingPermission")
-        @Override public void onConnectionStateChange(BluetoothGatt gatt, int statusCode, int newState) {
+        @Override public void onConnectionStateChange(
+                BluetoothGatt gatt, int statusCode, int newState) {
             if (statusCode != BluetoothGatt.GATT_SUCCESS) {
                 setStatus("BLE MIDI connection error (" + statusCode + ")");
                 try { gatt.close(); } catch (Exception ignored) { }
@@ -561,7 +785,8 @@ public final class BleMidiSyncManager {
             BluetoothGattDescriptor cccd = characteristic.getDescriptor(CCCD_UUID);
             if (cccd != null) {
                 if (Build.VERSION.SDK_INT >= 33) {
-                    gatt.writeDescriptor(cccd, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE);
+                    gatt.writeDescriptor(
+                            cccd, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE);
                 } else {
                     cccd.setValue(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE);
                     gatt.writeDescriptor(cccd);
@@ -570,11 +795,14 @@ public final class BleMidiSyncManager {
             setStatus("SLAVE • BLE MIDI connected • waiting for clock");
         }
 
-        @Override public void onCharacteristicChanged(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic) {
+        @Override public void onCharacteristicChanged(
+                BluetoothGatt gatt, BluetoothGattCharacteristic characteristic) {
             parseBleMidi(characteristic.getValue());
         }
 
-        @Override public void onCharacteristicChanged(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic, byte[] value) {
+        @Override public void onCharacteristicChanged(
+                BluetoothGatt gatt, BluetoothGattCharacteristic characteristic,
+                byte[] value) {
             parseBleMidi(value);
         }
     };
