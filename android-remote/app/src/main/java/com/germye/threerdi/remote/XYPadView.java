@@ -13,7 +13,7 @@ public final class XYPadView extends View {
     private float xNorm = 0.5f, yNorm = 0.5f;
     private Listener listener;
 
-    public XYPadView(Context c) { super(c); setMinimumHeight(dp(190)); }
+    public XYPadView(Context c) { super(c); setMinimumHeight(Math.round(dp(190))); }
     public void setListener(Listener l) { listener = l; }
 
     @Override protected void onDraw(Canvas c) {
