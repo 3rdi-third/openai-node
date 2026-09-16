@@ -108,23 +108,25 @@ jobs:
           print('Packaged startup verified:', im.size, len(data), 'bytes')
           PY
 
-      - name: Verify Bluetooth MIDI implementation
+      - name: Verify Bluetooth MIDI and expanded theme UI
         shell: bash
         run: |
           grep -q 'BLUETOOTH_SCAN' android-dfam/app/src/main/AndroidManifest.xml
           grep -q 'MIDI_SERVICE_UUID' android-dfam/app/src/main/java/com/threerdi/dfamstyle/BleMidiSyncManager.java
           grep -q 'BluetoothMidiActivity' android-dfam/app/src/main/AndroidManifest.xml
           grep -q 'leftScroll.setFillViewport(true)' android-dfam/app/src/main/java/com/threerdi/dfamstyle/BluetoothMidiActivity.java
-          grep -q 'dp(38)' android-dfam/app/src/main/java/com/threerdi/dfamstyle/BluetoothMidiActivity.java
-          echo 'BLE MIDI and responsive MIDI UI verified.'
+          grep -q 'QUICK COLOUR PALETTE' android-dfam/app/src/main/java/com/threerdi/dfamstyle/ThemeActivity.java
+          grep -q 'CYBERPUNK' android-dfam/app/src/main/java/com/threerdi/dfamstyle/ThemeActivity.java
+          grep -q 'TOXIC' android-dfam/app/src/main/java/com/threerdi/dfamstyle/ThemeActivity.java
+          echo 'BLE MIDI and expanded colour theme UI verified.'
 
       - name: Rename APK
-        run: cp android-dfam/app/build/outputs/apk/debug/app-debug.apk 3rdi-Analog-Percussion-v2.3-BLE-MIDI.apk
+        run: cp android-dfam/app/build/outputs/apk/debug/app-debug.apk 3rdi-Analog-Percussion-v2.4-BLE-MIDI.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: 3rdi-Analog-Percussion-v2.3-BLE-MIDI-APK
-          path: 3rdi-Analog-Percussion-v2.3-BLE-MIDI.apk
+          name: 3rdi-Analog-Percussion-v2.4-BLE-MIDI-APK
+          path: 3rdi-Analog-Percussion-v2.4-BLE-MIDI.apk
           if-no-files-found: error
           retention-days: 30
