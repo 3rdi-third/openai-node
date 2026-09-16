@@ -36,11 +36,8 @@ jobs:
           yes | "$SDKMANAGER" --licenses >/dev/null || true
           "$SDKMANAGER" 'platform-tools' 'platforms;android-35' 'build-tools;35.0.0'
 
-      - name: Apply fullscreen/theme integration patch
+      - name: Apply fullscreen theme and preset integration
         run: python3 android-dfam/apply_v13.py
-
-      - name: Apply synth preset integration patch
-        run: python3 android-dfam/apply_v15.py
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
