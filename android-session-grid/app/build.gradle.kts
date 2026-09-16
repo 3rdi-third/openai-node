@@ -10,11 +10,11 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.threerdi.sessiongrid.compat"
+        applicationId = "com.threerdi.sessiongrid.safe"
         minSdk = 26
         targetSdk = 35
-        versionCode = 9
-        versionName = "1.5.2"
+        versionCode = 10
+        versionName = "1.5.3"
     }
 
     buildTypes {
@@ -22,8 +22,7 @@ android {
             isDebuggable = false
             isMinifyEnabled = false
             isShrinkResources = false
-            // Keep the Gradle release output unsigned. The CI workflow performs
-            // zipalign and explicit APK signing with v1 + v2 + v3 schemes.
+            // CI performs zipalign and explicit APK signing.
             signingConfig = null
         }
     }
@@ -43,6 +42,8 @@ kotlin {
     jvmToolchain(17)
 }
 
+// Keep the intro asset packaged for future optional use, but it is no longer
+// part of the launcher path in the crash-safe build.
 val prepareStartupVideo by tasks.registering {
     val partsDir = layout.projectDirectory.dir("startup-video-chunks")
     val outputFile = layout.projectDirectory.file("src/main/res/raw/startup_intro.mp4")
