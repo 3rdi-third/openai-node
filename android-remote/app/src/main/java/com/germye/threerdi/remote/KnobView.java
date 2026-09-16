@@ -25,7 +25,7 @@ public final class KnobView extends View {
     public KnobView(Context context, AttributeSet attrs) { super(context, attrs); init(); }
 
     private void init() {
-        setMinimumHeight(dp(132));
+        setMinimumHeight(Math.round(dp(132)));
         setBackgroundColor(Color.TRANSPARENT);
         setFocusable(true);
     }
