@@ -36,12 +36,14 @@ jobs:
           yes | "$SDKMANAGER" --licenses >/dev/null || true
           "$SDKMANAGER" 'platform-tools' 'platforms;android-35' 'build-tools;35.0.0'
 
-      - name: Decode verified tiger startup artwork
+      - name: Render 1080p tiger startup artwork
         shell: bash
         run: |
+          python3 -m pip install --quiet pillow
           python3 - <<'PY'
           from pathlib import Path
-          import base64
+          import base64, io
+          from PIL import Image, ImageFilter, ImageEnhance
 
           root = Path('android-dfam')
           raw = root / 'app/src/main/res/raw/startup_background_b64_v17.txt'
@@ -49,14 +51,27 @@ jobs:
           if not (len(data) > 10000 and data[:4] == b'RIFF' and data[8:12] == b'WEBP'):
               raise RuntimeError('startup artwork is not a valid WebP')
 
+          source = Image.open(io.BytesIO(data)).convert('RGB')
+          source.load()
+          print('Source startup artwork:', source.size)
+
+          # Exact Full-HD portrait render. Preserve the existing composition,
+          # use high-quality resampling and conservative sharpening.
+          final = source.resize((1080, 1920), Image.Resampling.LANCZOS)
+          final = final.filter(ImageFilter.UnsharpMask(radius=1.15, percent=115, threshold=2))
+          final = ImageEnhance.Sharpness(final).enhance(1.08)
+
           out = root / 'app/src/main/res/drawable-nodpi/startup_screen_final.webp'
           out.parent.mkdir(parents=True, exist_ok=True)
-          out.write_bytes(data)
-          print('Verified startup WebP:', len(data), 'bytes')
+          final.save(out, format='WEBP', quality=95, method=6)
 
-          # apply_v13.py still contains the former JPEG-decoding preamble.
-          # Remove only that preamble in the CI workspace; the synth/theme/
-          # preset integration below it remains unchanged.
+          check = Image.open(out)
+          if check.size != (1080, 1920):
+              raise RuntimeError(f'Wrong startup size: {check.size}')
+          print('Rendered startup artwork:', check.size, out.stat().st_size, 'bytes')
+
+          # apply_v13.py contains the old startup-decoding preamble. Remove only
+          # that block in the CI workspace while keeping synth/theme/preset patches.
           patch = root / 'apply_v13.py'
           text = patch.read_text()
           marker_start = text.index('# Decode the compact, verified original startup artwork')
@@ -76,7 +91,7 @@ jobs:
         working-directory: android-dfam
         run: gradle --no-daemon :app:assembleDebug
 
-      - name: Verify final startup artwork is packaged
+      - name: Verify packaged 1080p startup artwork
         shell: bash
         run: |
           APK='android-dfam/app/build/outputs/apk/debug/app-debug.apk'
@@ -85,20 +100,24 @@ jobs:
             unzip -p "$APK" 'res/drawable-nodpi/startup_screen_final.webp' > /tmp/startup.webp
           python3 - <<'PY'
           from pathlib import Path
+          from PIL import Image
           p = Path('/tmp/startup.webp')
           data = p.read_bytes()
           if not (len(data) > 10000 and data[:4] == b'RIFF' and data[8:12] == b'WEBP'):
               raise RuntimeError('Packaged startup artwork failed WebP validation')
-          print('Packaged startup WebP validated:', len(data), 'bytes')
+          im = Image.open(p)
+          if im.size != (1080, 1920):
+              raise RuntimeError(f'Packaged startup is not 1080p: {im.size}')
+          print('Packaged startup verified:', im.size, len(data), 'bytes')
           PY
 
       - name: Rename APK
-        run: cp android-dfam/app/build/outputs/apk/debug/app-debug.apk 3rdi-Analog-Percussion-v2.0.apk
+        run: cp android-dfam/app/build/outputs/apk/debug/app-debug.apk 3rdi-Analog-Percussion-v2.1.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: 3rdi-Analog-Percussion-v2.0-APK
-          path: 3rdi-Analog-Percussion-v2.0.apk
+          name: 3rdi-Analog-Percussion-v2.1-1080p-APK
+          path: 3rdi-Analog-Percussion-v2.1.apk
           if-no-files-found: error
           retention-days: 30
