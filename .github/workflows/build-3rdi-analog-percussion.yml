@@ -36,18 +36,8 @@ jobs:
           yes | "$SDKMANAGER" --licenses >/dev/null || true
           "$SDKMANAGER" 'platform-tools' 'platforms;android-35' 'build-tools;35.0.0'
 
-      - name: Apply synth integration without startup bitmap
-        shell: bash
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          p = Path('android-dfam/apply_v13.py')
-          s = p.read_text()
-          start = s.index('# Build the startup artwork into a real Android drawable.')
-          end = s.index('s = main.read_text()')
-          p.write_text(s[:start] + s[end:])
-          PY
-          python3 android-dfam/apply_v13.py
+      - name: Generate verified startup artwork and apply synth integration
+        run: python3 android-dfam/apply_v13.py
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -58,22 +48,19 @@ jobs:
         working-directory: android-dfam
         run: gradle --no-daemon :app:assembleDebug
 
-      - name: Verify APK contains no startup bitmap
+      - name: Verify final startup artwork is packaged
         shell: bash
         run: |
-          if unzip -l android-dfam/app/build/outputs/apk/debug/app-debug.apk | grep -q 'startup_screen_v17'; then
-            echo 'Unexpected startup bitmap found in APK'
-            exit 1
-          fi
-          echo 'Native startup verified: no startup_screen_v17 bitmap packaged.'
+          unzip -l android-dfam/app/build/outputs/apk/debug/app-debug.apk | grep -q 'startup_screen_final' || { echo 'Final startup artwork missing'; exit 1; }
+          echo 'Verified final startup artwork is packaged.'
 
       - name: Rename APK
-        run: cp android-dfam/app/build/outputs/apk/debug/app-debug.apk 3rdi-Analog-Percussion-v1.9.apk
+        run: cp android-dfam/app/build/outputs/apk/debug/app-debug.apk 3rdi-Analog-Percussion-v2.0.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: 3rdi-Analog-Percussion-v1.9-APK
-          path: 3rdi-Analog-Percussion-v1.9.apk
+          name: 3rdi-Analog-Percussion-v2.0-APK
+          path: 3rdi-Analog-Percussion-v2.0.apk
           if-no-files-found: error
           retention-days: 30
