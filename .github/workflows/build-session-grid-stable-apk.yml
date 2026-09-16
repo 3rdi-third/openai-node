@@ -28,27 +28,57 @@ jobs:
         working-directory: android-session-grid
         run: gradle --no-daemon clean lintDebug testDebugUnitTest
 
-      - name: Build stable release APK
+      - name: Build unsigned release APK
         working-directory: android-session-grid
         run: gradle --no-daemon assembleRelease
 
-      - name: Verify APK package and signature
+      - name: Zipalign and sign compatibility APK
         shell: bash
         run: |
           set -euo pipefail
-          APK="android-session-grid/app/build/outputs/apk/release/app-release.apk"
-          test -s "$APK"
-          unzip -t "$APK" >/dev/null
-          sha256sum "$APK"
-          ls -lh "$APK"
+          INPUT="android-session-grid/app/build/outputs/apk/release/app-release-unsigned.apk"
+          ALIGNED="android-session-grid/app/build/outputs/apk/release/3rdi-session-grid-v1.5.2-aligned.apk"
+          FINAL="android-session-grid/app/build/outputs/apk/release/3rdi-session-grid-v1.5.2-installable.apk"
+          test -s "$INPUT"
 
+          ZIPALIGN="$(find "$ANDROID_HOME/build-tools" -type f -name zipalign -print | sort -V | tail -1)"
           APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner -print | sort -V | tail -1)"
-          test -n "$APKSIGNER"
+          test -x "$ZIPALIGN"
           test -x "$APKSIGNER"
-          "$APKSIGNER" verify --verbose --print-certs "$APK"
+
+          keytool -genkeypair -v \
+            -keystore /tmp/3rdi-session-grid-install.jks \
+            -storepass sessiongrid152 \
+            -keypass sessiongrid152 \
+            -alias sessiongrid \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -dname "CN=3rdi Session Grid, OU=Android, O=3rdi, C=BE"
+
+          "$ZIPALIGN" -p -f 4 "$INPUT" "$ALIGNED"
+          "$APKSIGNER" sign \
+            --ks /tmp/3rdi-session-grid-install.jks \
+            --ks-key-alias sessiongrid \
+            --ks-pass pass:sessiongrid152 \
+            --key-pass pass:sessiongrid152 \
+            --v1-signing-enabled true \
+            --v2-signing-enabled true \
+            --v3-signing-enabled true \
+            --out "$FINAL" \
+            "$ALIGNED"
+
+          "$ZIPALIGN" -c -v 4 "$FINAL"
+          "$APKSIGNER" verify --verbose --print-certs "$FINAL"
+          unzip -t "$FINAL" >/dev/null
+          sha256sum "$FINAL"
+          ls -lh "$FINAL"
+
+          AAPT2="$(find "$ANDROID_HOME/build-tools" -type f -name aapt2 -print | sort -V | tail -1)"
+          if [ -x "$AAPT2" ]; then
+            "$AAPT2" dump badging "$FINAL" | head -20
+          fi
 
       - uses: actions/upload-artifact@v4
         with:
-          name: 3rdi-session-grid-v1.5.1-installable-apk
-          path: android-session-grid/app/build/outputs/apk/release/app-release.apk
+          name: 3rdi-session-grid-v1.5.2-installable-apk
+          path: android-session-grid/app/build/outputs/apk/release/3rdi-session-grid-v1.5.2-installable.apk
           if-no-files-found: error
