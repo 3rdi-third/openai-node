@@ -18,6 +18,7 @@ import android.provider.OpenableColumns
 import android.view.MotionEvent
 import android.view.View
 import java.io.File
+import java.util.ArrayDeque
 import kotlin.math.roundToInt
 
 private const val PICK_AUDIO = 4203
@@ -61,7 +62,7 @@ class MainActivity : Activity() {
     }
 
     override fun onDestroy() {
-        sessionView.shutdown()
+        if (::sessionView.isInitialized) sessionView.shutdown()
         super.onDestroy()
     }
 }
@@ -96,8 +97,6 @@ class SessionView(
     private var playing = false
     private var transportStart = 0L
     private var quantizeBeats = 4
-    private var downX = 0f
-    private var downY = 0f
     private var downAt = 0L
     private var lastTapAt = 0L
     private val tapIntervals = ArrayDeque<Long>()
@@ -134,7 +133,9 @@ class SessionView(
     private fun saveProject() {
         val e = prefs.edit().putFloat("bpm", bpm).putInt("quantize", quantizeBeats)
         for (t in 0..7) {
-            e.putFloat("volume_$t", volumes[t]).putBoolean("armed_$t", armed[t]).putBoolean("muted_$t", muted[t])
+            e.putFloat("volume_$t", volumes[t])
+                .putBoolean("armed_$t", armed[t])
+                .putBoolean("muted_$t", muted[t])
             for (s in 0..7) {
                 val clip = clips[t][s]
                 if (clip.uri == null) {
@@ -320,8 +321,6 @@ class SessionView(
     override fun onTouchEvent(e: MotionEvent): Boolean {
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
-                downX = e.x
-                downY = e.y
                 downAt = SystemClock.elapsedRealtime()
                 return true
             }
@@ -346,7 +345,11 @@ class SessionView(
                 x >= w - 216f && x < w - 168f -> setBpm(bpm - 1f)
                 x >= w - 168f && x < w - 102f -> tapTempo()
                 x >= w - 102f && x < w - 53f -> setBpm(bpm + 1f)
-                x >= w - 53f -> { quantizeBeats = if (quantizeBeats == 4) 1 else 4; saveProject(); invalidate() }
+                x >= w - 53f -> {
+                    quantizeBeats = if (quantizeBeats == 4) 1 else 4
+                    saveProject()
+                    invalidate()
+                }
             }
             return
         }
@@ -381,16 +384,22 @@ class SessionView(
         if (y in mixerY..(mixerY + 78f)) {
             val localX = x - (left + t * (tw + gap))
             when {
-                localX in 0f..32f && y < mixerY + 34f -> { armed[t] = !armed[t]; saveProject(); invalidate() }
+                localX in 0f..32f && y < mixerY + 34f -> {
+                    armed[t] = !armed[t]
+                    saveProject()
+                    invalidate()
+                }
                 localX in 32f..64f && y < mixerY + 34f -> {
                     muted[t] = !muted[t]
                     applyTrackVolume(t)
-                    saveProject(); invalidate()
+                    saveProject()
+                    invalidate()
                 }
                 y >= mixerY + 34f -> {
                     volumes[t] = ((localX - 6f) / (tw - 12f)).coerceIn(0f, 1f)
                     applyTrackVolume(t)
-                    saveProject(); invalidate()
+                    saveProject()
+                    invalidate()
                 }
             }
         }
@@ -400,7 +409,7 @@ class SessionView(
         if (playing) {
             playing = false
             for (t in 0..7) {
-                pending[t]?.let(handler::removeCallbacks)
+                pending[t]?.let { handler.removeCallbacks(it) }
                 pending[t] = null
                 stopTrackNow(t)
             }
@@ -420,7 +429,9 @@ class SessionView(
                 while (tapIntervals.size > 4) tapIntervals.removeFirst()
                 val average = tapIntervals.average()
                 setBpm((60000.0 / average).toFloat())
-            } else tapIntervals.clear()
+            } else {
+                tapIntervals.clear()
+            }
         }
         lastTapAt = now
     }
@@ -445,8 +456,10 @@ class SessionView(
             playing = true
             transportStart = SystemClock.elapsedRealtime()
         }
-        pending[track]?.let(handler::removeCallbacks)
-        for (s in 0..7) if (clips[track][s].state == 2 || clips[track][s].state == 4) clips[track][s].state = 1
+        pending[track]?.let { handler.removeCallbacks(it) }
+        for (s in 0..7) {
+            if (clips[track][s].state == 2 || clips[track][s].state == 4) clips[track][s].state = 1
+        }
         clips[track][scene].state = 2
         activeScene[track] = scene
         val job = Runnable { launchNow(track, scene) }
@@ -458,9 +471,12 @@ class SessionView(
     private fun queueStop(track: Int) {
         val scene = activeScene[track]
         if (scene !in 0..7) return
-        pending[track]?.let(handler::removeCallbacks)
+        pending[track]?.let { handler.removeCallbacks(it) }
         clips[track][scene].state = 4
-        val job = Runnable { stopTrackNow(track); invalidate() }
+        val job = Runnable {
+            stopTrackNow(track)
+            invalidate()
+        }
         pending[track] = job
         handler.postDelayed(job, delayToBoundary())
         invalidate()
@@ -499,30 +515,40 @@ class SessionView(
     }
 
     private fun stopTrackNow(track: Int) {
-        try { players[track]?.stop() } catch (_: Exception) {}
+        try {
+            players[track]?.stop()
+        } catch (_: Exception) {
+        }
         players[track]?.release()
         players[track] = null
-        for (s in 0..7) if (clips[track][s].uri != null) clips[track][s].state = 1 else clips[track][s].state = 0
+        for (s in 0..7) {
+            clips[track][s].state = if (clips[track][s].uri != null) 1 else 0
+        }
         activeScene[track] = -1
     }
 
     private fun applyTrackVolume(track: Int) {
         val gain = if (muted[track]) 0f else volumes[track]
-        try { players[track]?.setVolume(gain, gain) } catch (_: Exception) {}
+        try {
+            players[track]?.setVolume(gain, gain)
+        } catch (_: Exception) {
+        }
     }
 
     fun shutdown() {
         for (t in 0..7) {
-            pending[t]?.let(handler::removeCallbacks)
+            pending[t]?.let { handler.removeCallbacks(it) }
             pending[t] = null
             stopTrackNow(t)
         }
         saveProject()
     }
 
-    private fun formatBpm(): String = if (bpm % 1f == 0f) bpm.toInt().toString() else String.format("%.1f", bpm)
+    private fun formatBpm(): String =
+        if (bpm % 1f == 0f) bpm.toInt().toString() else String.format("%.1f", bpm)
 
-    private fun ellipsize(text: String, max: Int): String = if (text.length <= max) text else text.take(max - 1) + "…"
+    private fun ellipsize(text: String, max: Int): String =
+        if (text.length <= max) text else text.take(max - 1) + "…"
 
     private fun blend(a: Int, b: Int, amountB: Float): Int {
         val k = amountB.coerceIn(0f, 1f)
