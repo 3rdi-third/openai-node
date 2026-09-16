@@ -39,9 +39,11 @@ jobs:
       - name: Recover startup artwork as Android drawable
         shell: bash
         run: |
+          python3 -m pip install --quiet pillow
           python3 - <<'PY'
           from pathlib import Path
-          import base64
+          import base64, io
+          from PIL import Image, ImageFile
 
           raw_path = Path('android-dfam/app/src/main/res/raw/startup_background_b64_v17.txt')
           raw = raw_path.read_text()
@@ -49,21 +51,26 @@ jobs:
           clean = ''.join(ch for ch in raw if ch in alphabet)
           clean += '=' * ((-len(clean)) % 4)
           data = base64.b64decode(clean, validate=False)
-
           if not data.startswith(b'\xff\xd8'):
               raise RuntimeError('Startup artwork has no JPEG SOI marker')
-          eoi = data.rfind(b'\xff\xd9')
-          if eoi < 0:
-              raise RuntimeError('Startup artwork has no JPEG EOI marker')
-          data = data[:eoi + 2]
+
+          ImageFile.LOAD_TRUNCATED_IMAGES = True
+          try:
+              image = Image.open(io.BytesIO(data)).convert('RGB')
+              image.load()
+          except Exception as exc:
+              raise RuntimeError(f'Could not recover truncated startup JPEG: {exc}')
 
           out = Path('android-dfam/app/src/main/res/drawable-nodpi/startup_screen_v17.jpg')
           out.parent.mkdir(parents=True, exist_ok=True)
-          out.write_bytes(data)
-          print(f'Recovered startup JPEG: {len(data)} bytes')
+          image.save(out, format='JPEG', quality=88, optimize=True, progressive=False)
+          repaired = out.read_bytes()
+          if not (repaired.startswith(b'\xff\xd8') and repaired.endswith(b'\xff\xd9')):
+              raise RuntimeError('Re-encoded startup artwork is not a valid JPEG')
+          print(f'Recovered startup artwork: {image.size[0]}x{image.size[1]}, {len(repaired)} bytes')
 
-          # The artwork is now a real binary drawable. Remove the obsolete
-          # image-decoding preamble from the integration script for this run.
+          # The artwork is now a binary drawable; skip the obsolete Base64
+          # conversion block in the integration script for this CI run.
           patch = Path('android-dfam/apply_v13.py')
           text = patch.read_text()
           marker_start = text.index('# Build the startup artwork into a real Android drawable.')
