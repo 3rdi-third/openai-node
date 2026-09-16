@@ -12,6 +12,7 @@ private const val SAFE_PICK_AUDIO = 5303
 
 class SafeMainActivity : Activity() {
     private var sessionView: FxSessionView? = null
+    private var midiLayout: MidiSyncLayout? = null
     private var pendingTrack = -1
     private var pendingScene = -1
 
@@ -21,8 +22,12 @@ class SafeMainActivity : Activity() {
         try {
             @Suppress("DEPRECATION")
             window.decorView.systemUiVisibility = 5894
-            sessionView = FxSessionView(this, ::pickAudio)
-            setContentView(sessionView)
+            val view = FxSessionView(this, ::pickAudio)
+            sessionView = view
+            val syncLayout = MidiSyncLayout(this, view)
+            midiLayout = syncLayout
+            setContentView(syncLayout)
+            syncLayout.requestBluetoothPermissions()
         } catch (t: Throwable) {
             showCrashScreen(t)
         }
@@ -62,6 +67,15 @@ class SafeMainActivity : Activity() {
         } catch (t: Throwable) {
             showCrashScreen(t)
         }
+    }
+
+    override fun onDestroy() {
+        try {
+            midiLayout?.shutdown()
+            sessionView?.shutdown()
+        } catch (_: Throwable) {
+        }
+        super.onDestroy()
     }
 
     private fun showCrashScreen(t: Throwable) {
