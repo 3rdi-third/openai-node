@@ -7,6 +7,10 @@
         <activity
             android:name=".StartupActivity"
             android:screenOrientation="landscape"
+            android:exported="false" />
+        <activity
+            android:name=".SafeMainActivity"
+            android:screenOrientation="landscape"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
