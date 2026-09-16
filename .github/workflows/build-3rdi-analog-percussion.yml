@@ -36,8 +36,18 @@ jobs:
           yes | "$SDKMANAGER" --licenses >/dev/null || true
           "$SDKMANAGER" 'platform-tools' 'platforms;android-35' 'build-tools;35.0.0'
 
-      - name: Prepare verified startup artwork and synth integration
-        run: python3 android-dfam/apply_v13.py
+      - name: Apply synth integration without startup bitmap
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('android-dfam/apply_v13.py')
+          s = p.read_text()
+          start = s.index('# Build the startup artwork into a real Android drawable.')
+          end = s.index('s = main.read_text()')
+          p.write_text(s[:start] + s[end:])
+          PY
+          python3 android-dfam/apply_v13.py
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -47,6 +57,15 @@ jobs:
       - name: Build debug APK
         working-directory: android-dfam
         run: gradle --no-daemon :app:assembleDebug
+
+      - name: Verify APK contains no startup bitmap
+        shell: bash
+        run: |
+          if unzip -l android-dfam/app/build/outputs/apk/debug/app-debug.apk | grep -q 'startup_screen_v17'; then
+            echo 'Unexpected startup bitmap found in APK'
+            exit 1
+          fi
+          echo 'Native startup verified: no startup_screen_v17 bitmap packaged.'
 
       - name: Rename APK
         run: cp android-dfam/app/build/outputs/apk/debug/app-debug.apk 3rdi-Analog-Percussion-v1.9.apk
