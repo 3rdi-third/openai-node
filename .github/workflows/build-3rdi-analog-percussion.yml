@@ -54,9 +54,6 @@ jobs:
           source = Image.open(io.BytesIO(data)).convert('RGB')
           source.load()
           print('Source startup artwork:', source.size)
-
-          # Exact Full-HD portrait render. Preserve the existing composition,
-          # use high-quality resampling and conservative sharpening.
           final = source.resize((1080, 1920), Image.Resampling.LANCZOS)
           final = final.filter(ImageFilter.UnsharpMask(radius=1.15, percent=115, threshold=2))
           final = ImageEnhance.Sharpness(final).enhance(1.08)
@@ -64,14 +61,13 @@ jobs:
           out = root / 'app/src/main/res/drawable-nodpi/startup_screen_final.webp'
           out.parent.mkdir(parents=True, exist_ok=True)
           final.save(out, format='WEBP', quality=95, method=6)
-
           check = Image.open(out)
           if check.size != (1080, 1920):
               raise RuntimeError(f'Wrong startup size: {check.size}')
           print('Rendered startup artwork:', check.size, out.stat().st_size, 'bytes')
 
-          # apply_v13.py contains the old startup-decoding preamble. Remove only
-          # that block in the CI workspace while keeping synth/theme/preset patches.
+          # apply_v13.py still contains its obsolete image-decoding preamble.
+          # Strip only that block in the CI workspace; all synth patches remain.
           patch = root / 'apply_v13.py'
           text = patch.read_text()
           marker_start = text.index('# Decode the compact, verified original startup artwork')
@@ -79,8 +75,11 @@ jobs:
           patch.write_text(text[:marker_start] + text[marker_end:])
           PY
 
-      - name: Apply synth integration
+      - name: Apply synth/theme/preset integration
         run: python3 android-dfam/apply_v13.py
+
+      - name: Apply Bluetooth MIDI integration
+        run: python3 android-dfam/apply_v22.py
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -111,13 +110,21 @@ jobs:
           print('Packaged startup verified:', im.size, len(data), 'bytes')
           PY
 
+      - name: Verify Bluetooth MIDI implementation
+        shell: bash
+        run: |
+          grep -q 'BLUETOOTH_SCAN' android-dfam/app/src/main/AndroidManifest.xml
+          grep -q 'MIDI_SERVICE_UUID' android-dfam/app/src/main/java/com/threerdi/dfamstyle/BleMidiSyncManager.java
+          grep -q 'BluetoothMidiActivity' android-dfam/app/src/main/AndroidManifest.xml
+          echo 'BLE MIDI source and permissions verified.'
+
       - name: Rename APK
-        run: cp android-dfam/app/build/outputs/apk/debug/app-debug.apk 3rdi-Analog-Percussion-v2.1.apk
+        run: cp android-dfam/app/build/outputs/apk/debug/app-debug.apk 3rdi-Analog-Percussion-v2.2-BLE-MIDI.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: 3rdi-Analog-Percussion-v2.1-1080p-APK
-          path: 3rdi-Analog-Percussion-v2.1.apk
+          name: 3rdi-Analog-Percussion-v2.2-BLE-MIDI-APK
+          path: 3rdi-Analog-Percussion-v2.2-BLE-MIDI.apk
           if-no-files-found: error
           retention-days: 30
