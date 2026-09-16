@@ -27,7 +27,6 @@ class MidiSyncLayout(
 
     private var downAt = 0L
     private var beforePlaying = false
-    private var beforeActive = IntArray(8) { -1 }
 
     private var tempoMsb = 0
     private var lastClockNs = 0L
@@ -83,7 +82,6 @@ class MidiSyncLayout(
         if (ev.actionMasked == MotionEvent.ACTION_DOWN) {
             downAt = SystemClock.elapsedRealtime()
             beforePlaying = readPlaying()
-            beforeActive = readActiveScenes()
         }
 
         val handled = super.dispatchTouchEvent(ev)
@@ -243,12 +241,12 @@ class MidiSyncLayout(
 
     private fun sendTempo(bpm: Float) {
         val bpm10 = (bpm.coerceIn(40f, 300f) * 10f).roundToInt().coerceIn(0, 16383)
-        link.sendMidi(byteArrayOf(0xBF.toByte(), 20, ((bpm10 shr 7) and 0x7f).toByte()))
-        link.sendMidi(byteArrayOf(0xBF.toByte(), 52, (bpm10 and 0x7f).toByte()))
+        link.sendMidi(byteArrayOf(0xBF.toByte(), 20.toByte(), ((bpm10 shr 7) and 0x7f).toByte()))
+        link.sendMidi(byteArrayOf(0xBF.toByte(), 52.toByte(), (bpm10 and 0x7f).toByte()))
     }
 
     private fun sendQuantize(value: Int) {
-        link.sendMidi(byteArrayOf(0xBF.toByte(), 21, value.coerceIn(0, 127).toByte()))
+        link.sendMidi(byteArrayOf(0xBF.toByte(), 21.toByte(), value.coerceIn(0, 127).toByte()))
     }
 
     private fun startHostClockIfNeeded() {
@@ -268,9 +266,6 @@ class MidiSyncLayout(
     private fun readBpm(): Float = (readField("bpm") as? Float ?: prefs.getFloat("bpm", 133f)).coerceIn(40f, 300f)
 
     private fun readQuantize(): Int = (readField("quantizeBeats") as? Int ?: prefs.getInt("quantize", 4)).let { if (it == 1) 1 else 4 }
-
-    private fun readActiveScenes(): IntArray =
-        ((readField("activeScene") as? IntArray)?.clone() ?: IntArray(8) { -1 })
 
     private fun readClipState(track: Int, scene: Int): Int {
         return try {
