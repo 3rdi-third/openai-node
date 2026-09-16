@@ -10,11 +10,11 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.threerdi.sessiongrid"
+        applicationId = "com.threerdi.sessiongrid.sideload"
         minSdk = 26
         targetSdk = 35
-        versionCode = 7
-        versionName = "1.5.0"
+        versionCode = 8
+        versionName = "1.5.1"
     }
 
     buildTypes {
@@ -22,8 +22,8 @@ android {
             isDebuggable = false
             isMinifyEnabled = false
             isShrinkResources = false
-            // Installable release candidate without publishing a private production key.
-            // Replace this with a private release signing config before store distribution.
+            // Installable sideload release. A dedicated package ID avoids
+            // signature conflicts with older development builds.
             signingConfig = signingConfigs.getByName("debug")
         }
     }
