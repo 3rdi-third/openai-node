@@ -24,6 +24,8 @@ public final class SettingsActivity extends Activity {
     private static final int SAND = Color.rgb(218, 198, 165);
     private static final int ORANGE = Color.rgb(224, 111, 36);
     private static final int BLACK = Color.rgb(18, 18, 16);
+    private static final int GAIN_MIN = 25;
+    private static final int GAIN_MAX = 120;
 
     private Spinner sampleRate;
     private Spinner bufferProfile;
@@ -94,11 +96,10 @@ public final class SettingsActivity extends Activity {
         masterGainValue = text("86%", 12, true);
         right.addView(masterGainValue);
         masterGain = new SeekBar(this);
-        masterGain.setMax(120);
-        masterGain.setMin(25);
+        masterGain.setMax(GAIN_MAX - GAIN_MIN);
         masterGain.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
-                masterGainValue.setText(progress + "%");
+                masterGainValue.setText((progress + GAIN_MIN) + "%");
             }
             @Override public void onStartTrackingTouch(SeekBar seekBar) {}
             @Override public void onStopTrackingTouch(SeekBar seekBar) {}
@@ -149,8 +150,8 @@ public final class SettingsActivity extends Activity {
         bufferProfile.setSelection(Math.max(0, Math.min(2, AudioPreferences.bufferProfile(this))));
         lowLatency.setChecked(AudioPreferences.lowLatency(this));
         int gain = Math.round(AudioPreferences.masterGain(this) * 100f);
-        gain = Math.max(25, Math.min(120, gain));
-        masterGain.setProgress(gain);
+        gain = Math.max(GAIN_MIN, Math.min(GAIN_MAX, gain));
+        masterGain.setProgress(gain - GAIN_MIN);
         masterGainValue.setText(gain + "%");
         defaultBpm.setText(String.valueOf(AudioPreferences.defaultBpm(this)));
         keepScreenOn.setChecked(AudioPreferences.keepScreenOn(this));
@@ -166,12 +167,13 @@ public final class SettingsActivity extends Activity {
         bpm = Math.max(40f, Math.min(300f, bpm));
         int[] rates = {0, 44100, 48000, 96000};
         int sr = rates[Math.max(0, Math.min(3, sampleRate.getSelectedItemPosition()))];
+        int gainPercent = masterGain.getProgress() + GAIN_MIN;
 
         SharedPreferences.Editor e = AudioPreferences.prefs(this).edit();
         e.putInt(AudioPreferences.SAMPLE_RATE, sr);
         e.putInt(AudioPreferences.BUFFER_PROFILE, Math.max(0, Math.min(2, bufferProfile.getSelectedItemPosition())));
         e.putBoolean(AudioPreferences.LOW_LATENCY, lowLatency.isChecked());
-        e.putFloat(AudioPreferences.MASTER_GAIN, masterGain.getProgress() / 100f);
+        e.putFloat(AudioPreferences.MASTER_GAIN, gainPercent / 100f);
         e.putFloat(AudioPreferences.DEFAULT_BPM, bpm);
         e.putBoolean(AudioPreferences.KEEP_SCREEN_ON, keepScreenOn.isChecked());
         e.apply();
