@@ -36,6 +36,22 @@ jobs:
           yes | "$SDKMANAGER" --licenses >/dev/null || true
           "$SDKMANAGER" 'platform-tools' 'platforms;android-35' 'build-tools;35.0.0'
 
+      - name: Sanitize startup artwork resource
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('android-dfam/app/src/main/res/raw/startup_background_b64_v17.txt')
+          raw = p.read_text()
+          alphabet = set('ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=')
+          clean = ''.join(ch for ch in raw if ch in alphabet)
+          missing = (-len(clean)) % 4
+          if missing:
+              clean += '=' * missing
+          p.write_text(clean)
+          print(f'Sanitized startup Base64: {len(raw)} -> {len(clean)} chars')
+          PY
+
       - name: Prepare startup artwork and apply synth integration
         run: python3 android-dfam/apply_v13.py
 
