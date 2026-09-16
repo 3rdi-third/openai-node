@@ -1,6 +1,7 @@
 package com.threerdi.dfamstyle;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.Context;
 import android.content.pm.ActivityInfo;
 import android.graphics.Canvas;
@@ -13,10 +14,13 @@ import android.media.AudioManager;
 import android.media.AudioTrack;
 import android.os.Build;
 import android.os.Bundle;
+import android.text.InputType;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.Window;
 import android.view.WindowManager;
+import android.view.inputmethod.InputMethodManager;
+import android.widget.EditText;
 
 import java.util.Locale;
 import java.util.Random;
@@ -51,6 +55,7 @@ public final class MainActivity extends Activity {
         private static final float DH = 720f;
 
         private final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final RectF tempoRect = new RectF(60, 140, 170, 207);
         private final RectF runRect = new RectF(865, 610, 980, 675);
         private final RectF trigRect = new RectF(995, 610, 1085, 675);
         private final RectF randomRect = new RectF(1095, 610, 1180, 675);
@@ -66,6 +71,15 @@ public final class MainActivity extends Activity {
         volatile float vcfDecay = 420f;
         volatile float vcaDecay = 330f;
         volatile float drive = 2.2f;
+
+        // Expanded modulation section.
+        volatile float lfoRate = 3.0f;
+        volatile float lfoPitch = 0.0f;       // semitones, bipolar
+        volatile float lfoFilter = 0.0f;      // octaves, bipolar
+        volatile float lfoFm = 0.0f;          // extra FM depth
+        volatile float filterEnvAmount = 5.5f;
+        volatile float pitchEnvAmount = 0.0f; // semitones, bipolar
+
         volatile boolean running = true;
 
         final float[] stepPitch = {0f, 0f, 7f, -5f, 0f, 12f, -2f, 5f};
@@ -119,8 +133,8 @@ public final class MainActivity extends Activity {
             canvas.drawRoundRect(new RectF(48, 48, 1152, 672), 12, 12, p);
 
             drawTitle(canvas);
+            drawTempoBox(canvas);
 
-            drawKnob(canvas, 90, 175, 54, norm(tempo, 40, 300), "TEMPO", String.format(Locale.US, "%.0f BPM", tempo));
             drawKnob(canvas, 225, 175, 54, logNorm(vco1, 28, 440), "VCO 1", formatHz(vco1));
             drawKnob(canvas, 360, 175, 54, norm(detune, -24, 24), "VCO 2", String.format(Locale.US, "%+.1f st", detune));
             drawKnob(canvas, 495, 175, 54, fm, "FM", String.format(Locale.US, "%.0f%%", fm * 100));
@@ -139,9 +153,10 @@ public final class MainActivity extends Activity {
                 drawStep(canvas, i, x, currentStep == i);
             }
 
+            drawBottomDivider(canvas);
             drawDrive(canvas);
+            drawModulation(canvas);
             drawButtons(canvas);
-            drawFooter(canvas);
 
             canvas.restore();
             postInvalidateDelayed(33);
@@ -161,6 +176,72 @@ public final class MainActivity extends Activity {
             p.setTextSize(18);
             c.drawText("LIVE ENGINE", 1128, 92, p);
             p.setTextAlign(Paint.Align.LEFT);
+        }
+
+        private void drawTempoBox(Canvas c) {
+            p.setStyle(Paint.Style.FILL);
+            p.setColor(Color.rgb(34, 34, 34));
+            c.drawRoundRect(tempoRect, 9, 9, p);
+            p.setStyle(Paint.Style.STROKE);
+            p.setStrokeWidth(2.5f);
+            p.setColor(Color.rgb(188, 70, 42));
+            c.drawRoundRect(tempoRect, 9, 9, p);
+            p.setStyle(Paint.Style.FILL);
+
+            p.setTextAlign(Paint.Align.CENTER);
+            p.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+            p.setColor(Color.rgb(237, 237, 226));
+            p.setTextSize(28);
+            String bpm = Math.abs(tempo - Math.round(tempo)) < 0.01f
+                    ? String.format(Locale.US, "%.0f", tempo)
+                    : String.format(Locale.US, "%.1f", tempo);
+            c.drawText(bpm, tempoRect.centerX(), tempoRect.centerY() + 4, p);
+            p.setTextSize(11);
+            p.setColor(Color.rgb(150, 150, 145));
+            c.drawText("BPM", tempoRect.centerX(), tempoRect.bottom - 8, p);
+            p.setTextSize(15);
+            p.setColor(Color.rgb(213, 213, 204));
+            c.drawText("TEMPO", tempoRect.centerX(), 249, p);
+            p.setTextSize(12);
+            p.setColor(Color.rgb(125, 125, 121));
+            c.drawText("TAP TO TYPE", tempoRect.centerX(), 267, p);
+        }
+
+        private void showTempoDialog() {
+            final EditText edit = new EditText(getContext());
+            edit.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL);
+            edit.setSingleLine(true);
+            edit.setSelectAllOnFocus(true);
+            edit.setText(String.format(Locale.US, "%.1f", tempo));
+            edit.setHint("40–300");
+
+            final AlertDialog dialog = new AlertDialog.Builder(getContext())
+                    .setTitle("Tempo (BPM)")
+                    .setMessage("Type a value from 40 to 300 BPM")
+                    .setView(edit)
+                    .setNegativeButton("Cancel", null)
+                    .setPositiveButton("Set", null)
+                    .create();
+
+            dialog.setOnShowListener(ignored -> {
+                dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+                    try {
+                        float entered = Float.parseFloat(edit.getText().toString().trim());
+                        tempo = clamp(entered, 40f, 300f);
+                        invalidate();
+                        dialog.dismiss();
+                    } catch (NumberFormatException ex) {
+                        edit.setError("Enter a number between 40 and 300");
+                    }
+                });
+                edit.requestFocus();
+                edit.postDelayed(() -> {
+                    InputMethodManager imm = (InputMethodManager) getContext().getSystemService(Context.INPUT_METHOD_SERVICE);
+                    if (imm != null) imm.showSoftInput(edit, InputMethodManager.SHOW_IMPLICIT);
+                }, 150);
+            });
+            dialog.getWindow();
+            dialog.show();
         }
 
         private void drawStep(Canvas c, int index, float x, boolean active) {
@@ -234,21 +315,63 @@ public final class MainActivity extends Activity {
             c.drawText(valueText, cx, cy + r + 37, p);
         }
 
+        private void drawCompactKnob(Canvas c, float cx, float cy, float value, String label, String valueText) {
+            float r = 24f;
+            value = clamp(value, 0f, 1f);
+            p.setStyle(Paint.Style.FILL);
+            p.setColor(Color.rgb(56, 56, 56));
+            c.drawCircle(cx, cy, r, p);
+            p.setColor(Color.rgb(20, 20, 20));
+            c.drawCircle(cx, cy, 17f, p);
+            double a = Math.toRadians(135 + 270 * value);
+            p.setStrokeWidth(3.5f);
+            p.setStrokeCap(Paint.Cap.ROUND);
+            p.setColor(Color.rgb(221, 221, 210));
+            c.drawLine(cx, cy,
+                    cx + (float) Math.cos(a) * 13f,
+                    cy + (float) Math.sin(a) * 13f, p);
+
+            p.setTextAlign(Paint.Align.CENTER);
+            p.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+            p.setTextSize(10.5f);
+            p.setColor(Color.rgb(182, 182, 175));
+            c.drawText(label, cx, cy - 37, p);
+            p.setTypeface(android.graphics.Typeface.DEFAULT);
+            p.setTextSize(10.5f);
+            p.setColor(Color.rgb(132, 132, 127));
+            c.drawText(valueText, cx, cy + 42, p);
+        }
+
+        private void drawBottomDivider(Canvas c) {
+            p.setColor(Color.rgb(54, 54, 54));
+            c.drawRect(64, 574, 1136, 576, p);
+        }
+
         private void drawDrive(Canvas c) {
             p.setTextAlign(Paint.Align.LEFT);
             p.setColor(Color.rgb(175, 175, 168));
-            p.setTextSize(14);
+            p.setTextSize(13);
             p.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
-            c.drawText("DRIVE", 70, 632, p);
-            RectF bar = new RectF(135, 614, 520, 638);
+            c.drawText("DRIVE", 70, 609, p);
+            RectF bar = new RectF(70, 621, 350, 643);
             p.setColor(Color.rgb(46, 46, 46));
-            c.drawRoundRect(bar, 12, 12, p);
+            c.drawRoundRect(bar, 11, 11, p);
             float amount = norm(drive, 1f, 6f);
             p.setColor(Color.rgb(213, 74, 40));
-            c.drawRoundRect(new RectF(bar.left, bar.top, bar.left + bar.width() * amount, bar.bottom), 12, 12, p);
+            c.drawRoundRect(new RectF(bar.left, bar.top, bar.left + bar.width() * amount, bar.bottom), 11, 11, p);
             p.setColor(Color.rgb(160, 160, 155));
-            p.setTextSize(13);
-            c.drawText(String.format(Locale.US, "%.1fx", drive), 535, 632, p);
+            p.setTextSize(12);
+            c.drawText(String.format(Locale.US, "%.1fx", drive), 360, 638, p);
+        }
+
+        private void drawModulation(Canvas c) {
+            float[] x = {430, 505, 580, 655, 730, 805};
+            drawCompactKnob(c, x[0], 618, logNorm(lfoRate, 0.05f, 30f), "LFO RATE", formatLfoRate(lfoRate));
+            drawCompactKnob(c, x[1], 618, norm(lfoPitch, -12f, 12f), "LFO>PITCH", String.format(Locale.US, "%+.1f st", lfoPitch));
+            drawCompactKnob(c, x[2], 618, norm(lfoFilter, -3f, 3f), "LFO>VCF", String.format(Locale.US, "%+.1f oct", lfoFilter));
+            drawCompactKnob(c, x[3], 618, lfoFm, "LFO>FM", String.format(Locale.US, "%.0f%%", lfoFm * 100f));
+            drawCompactKnob(c, x[4], 618, norm(filterEnvAmount, 0f, 10f), "VCF ENV", String.format(Locale.US, "%.1fx", filterEnvAmount));
+            drawCompactKnob(c, x[5], 618, norm(pitchEnvAmount, -24f, 24f), "PITCH ENV", String.format(Locale.US, "%+.1f st", pitchEnvAmount));
         }
 
         private void drawButtons(Canvas c) {
@@ -272,20 +395,16 @@ public final class MainActivity extends Activity {
             c.drawText(text, r.centerX(), r.centerY() + 6, p);
         }
 
-        private void drawFooter(Canvas c) {
-            p.setTextAlign(Paint.Align.LEFT);
-            p.setTypeface(android.graphics.Typeface.DEFAULT);
-            p.setTextSize(12);
-            p.setColor(Color.rgb(100, 100, 96));
-            c.drawText("DRAG KNOBS UP/DOWN • NO SAMPLES • REAL-TIME SYNTHESIS", 70, 664, p);
-        }
-
         @Override
         public boolean onTouchEvent(MotionEvent event) {
             float x = (event.getX() - canvasOffsetX) / canvasScale;
             float y = (event.getY() - canvasOffsetY) / canvasScale;
 
             if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
+                if (tempoRect.contains(x, y)) {
+                    showTempoDialog();
+                    return true;
+                }
                 if (runRect.contains(x, y)) {
                     running = !running;
                     if (!running && engine != null) engine.resetTransport();
@@ -323,24 +442,28 @@ public final class MainActivity extends Activity {
         }
 
         private int hitControl(float x, float y) {
-            float[] topX = {90, 225, 360, 495, 630, 765, 900, 1035, 1130};
+            float[] topX = {225, 360, 495, 630, 765, 900, 1035, 1130};
             for (int i = 0; i < topX.length; i++) {
-                float r = i == 8 ? 56 : 68;
-                if (dist2(x, y, topX[i], 175) <= r * r) return i;
+                float r = i == 7 ? 56 : 68;
+                if (dist2(x, y, topX[i], 175) <= r * r) return i + 1;
             }
             for (int i = 0; i < 8; i++) {
                 float sx = 118 + i * 133f;
                 if (dist2(x, y, sx, 390) <= 55 * 55) return 20 + i;
                 if (dist2(x, y, sx, 515) <= 55 * 55) return 30 + i;
             }
-            if (x >= 120 && x <= 555 && y >= 595 && y <= 655) return 10;
+            if (x >= 65 && x <= 380 && y >= 590 && y <= 655) return 10;
+
+            float[] modX = {430, 505, 580, 655, 730, 805};
+            for (int i = 0; i < modX.length; i++) {
+                if (dist2(x, y, modX[i], 618) <= 38 * 38) return 40 + i;
+            }
             return -1;
         }
 
         private void adjustControl(int id, float dy) {
             float up = -dy;
             switch (id) {
-                case 0: tempo = clamp(tempo + up * 0.65f, 40, 300); break;
                 case 1: vco1 = clamp((float) (vco1 * Math.exp(up * 0.012)), 28, 440); break;
                 case 2: detune = clamp(detune + up * 0.08f, -24, 24); break;
                 case 3: fm = clamp(fm + up * 0.004f, 0, 1); break;
@@ -350,6 +473,12 @@ public final class MainActivity extends Activity {
                 case 7: vcfDecay = clamp((float) (vcfDecay * Math.exp(up * 0.014)), 35, 2400); break;
                 case 8: vcaDecay = clamp((float) (vcaDecay * Math.exp(up * 0.014)), 35, 2400); break;
                 case 10: drive = clamp(drive + up * 0.02f, 1, 6); break;
+                case 40: lfoRate = clamp((float) (lfoRate * Math.exp(up * 0.018)), 0.05f, 30f); break;
+                case 41: lfoPitch = clamp(lfoPitch + up * 0.055f, -12f, 12f); break;
+                case 42: lfoFilter = clamp(lfoFilter + up * 0.012f, -3f, 3f); break;
+                case 43: lfoFm = clamp(lfoFm + up * 0.004f, 0f, 1f); break;
+                case 44: filterEnvAmount = clamp(filterEnvAmount + up * 0.025f, 0f, 10f); break;
+                case 45: pitchEnvAmount = clamp(pitchEnvAmount + up * 0.10f, -24f, 24f); break;
                 default:
                     if (id >= 20 && id < 28) {
                         int s = id - 20;
@@ -381,6 +510,11 @@ public final class MainActivity extends Activity {
             return String.format(Locale.US, "%.0f Hz", hz);
         }
 
+        private static String formatLfoRate(float hz) {
+            if (hz < 1f) return String.format(Locale.US, "%.2f Hz", hz);
+            return String.format(Locale.US, "%.1f Hz", hz);
+        }
+
         private static float norm(float v, float lo, float hi) {
             return clamp((v - lo) / (hi - lo), 0f, 1f);
         }
@@ -407,6 +541,7 @@ public final class MainActivity extends Activity {
         private int sampleRate;
         private double phase1 = 0.0;
         private double phase2 = 0.0;
+        private double lfoPhase = 0.0;
         private double samplesToNextStep = 0.0;
         private float envAmp = 0f;
         private float envFilter = 0f;
@@ -511,20 +646,30 @@ public final class MainActivity extends Activity {
                         currentStep = step;
                         trigger(step);
                         step = (step + 1) & 7;
-                        double bpm = Math.max(40.0, s.tempo);
+                        double bpm = Math.max(40.0, Math.min(300.0, s.tempo));
                         samplesToNextStep += sampleRate * 60.0 / bpm / 2.0;
                     }
                     samplesToNextStep -= 1.0;
                 }
 
+                lfoPhase += Math.max(0.05f, s.lfoRate) / sampleRate;
+                lfoPhase -= Math.floor(lfoPhase);
+                float lfo = (float) Math.sin(lfoPhase * Math.PI * 2.0);
+
                 float sample = 0f;
                 if (envAmp > 0.00002f) {
-                    float f2 = currentBaseHz * (float) Math.pow(2.0, s.detune / 12.0);
+                    float pitchModSemis = lfo * s.lfoPitch + envFilter * s.pitchEnvAmount;
+                    float modBaseHz = currentBaseHz * (float) Math.pow(2.0, pitchModSemis / 12.0);
+                    modBaseHz = Math.max(20f, Math.min(modBaseHz, sampleRate * 0.20f));
+
+                    float f2 = modBaseHz * (float) Math.pow(2.0, s.detune / 12.0);
+                    f2 = Math.max(20f, Math.min(f2, sampleRate * 0.20f));
                     phase2 += f2 / sampleRate;
                     phase2 -= Math.floor(phase2);
                     float osc2 = phase2 < 0.5 ? 1f : -1f;
 
-                    float instHz = currentBaseHz * (1f + osc2 * s.fm * 0.22f);
+                    float fmDepth = Math.max(0f, Math.min(1.5f, s.fm + lfo * s.lfoFm));
+                    float instHz = modBaseHz * (1f + osc2 * fmDepth * 0.22f);
                     instHz = Math.max(20f, Math.min(instHz, sampleRate * 0.20f));
                     phase1 += instHz / sampleRate;
                     phase1 -= Math.floor(phase1);
@@ -533,7 +678,9 @@ public final class MainActivity extends Activity {
                     float n = (noiseGen.nextFloat() * 2f - 1f) * s.noise;
                     float mix = osc1 * 0.68f + osc2 * 0.42f + n;
 
-                    float envCut = s.cutoff * (1f + envFilter * 5.5f);
+                    float lfoFilterMultiplier = (float) Math.pow(2.0, lfo * s.lfoFilter);
+                    float envFilterMultiplier = 1f + envFilter * s.filterEnvAmount;
+                    float envCut = s.cutoff * lfoFilterMultiplier * envFilterMultiplier;
                     envCut = Math.max(60f, Math.min(envCut, sampleRate * 0.42f));
                     sample = ladderish(mix, envCut, s.resonance);
                     sample *= envAmp * currentVelocity;
