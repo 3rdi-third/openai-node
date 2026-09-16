@@ -36,27 +36,32 @@ jobs:
           yes | "$SDKMANAGER" --licenses >/dev/null || true
           "$SDKMANAGER" 'platform-tools' 'platforms;android-35' 'build-tools;35.0.0'
 
-      - name: Decode verified original startup artwork
+      - name: Decode verified tiger startup artwork
         shell: bash
         run: |
           python3 - <<'PY'
           from pathlib import Path
           import base64
-          root=Path('android-dfam')
-          raw=root/'app/src/main/res/raw'
-          encoded=''.join((raw/f'startup_b64_0{i}.txt').read_text().strip() for i in range(1,5))
-          data=base64.b64decode(encoded, validate=True)
-          if not (data.startswith(b'\xff\xd8') and data.endswith(b'\xff\xd9')):
-              raise RuntimeError('startup artwork is not a valid JPEG')
-          out=root/'app/src/main/res/drawable-nodpi/startup_screen_final.jpg'
+
+          root = Path('android-dfam')
+          raw = root / 'app/src/main/res/raw/startup_background_b64_v17.txt'
+          data = base64.b64decode(''.join(raw.read_text().split()), validate=True)
+          if not (len(data) > 10000 and data[:4] == b'RIFF' and data[8:12] == b'WEBP'):
+              raise RuntimeError('startup artwork is not a valid WebP')
+
+          out = root / 'app/src/main/res/drawable-nodpi/startup_screen_final.webp'
           out.parent.mkdir(parents=True, exist_ok=True)
           out.write_bytes(data)
-          print('Verified startup JPEG:',len(data),'bytes')
-          patch=root/'apply_v13.py'
-          text=patch.read_text()
-          marker_start=text.index('# Decode the compact, verified original startup artwork')
-          marker_end=text.index('s = main.read_text()')
-          patch.write_text(text[:marker_start]+text[marker_end:])
+          print('Verified startup WebP:', len(data), 'bytes')
+
+          # apply_v13.py still contains the former JPEG-decoding preamble.
+          # Remove only that preamble in the CI workspace; the synth/theme/
+          # preset integration below it remains unchanged.
+          patch = root / 'apply_v13.py'
+          text = patch.read_text()
+          marker_start = text.index('# Decode the compact, verified original startup artwork')
+          marker_end = text.index('s = main.read_text()')
+          patch.write_text(text[:marker_start] + text[marker_end:])
           PY
 
       - name: Apply synth integration
@@ -74,8 +79,18 @@ jobs:
       - name: Verify final startup artwork is packaged
         shell: bash
         run: |
-          unzip -l android-dfam/app/build/outputs/apk/debug/app-debug.apk | grep -q 'startup_screen_final' || { echo 'Final startup artwork missing'; exit 1; }
-          echo 'Original startup artwork packaged successfully.'
+          APK='android-dfam/app/build/outputs/apk/debug/app-debug.apk'
+          unzip -l "$APK" | grep -q 'startup_screen_final.webp' || { echo 'Final WebP startup artwork missing'; exit 1; }
+          unzip -p "$APK" 'res/drawable-nodpi-v4/startup_screen_final.webp' > /tmp/startup.webp || \
+            unzip -p "$APK" 'res/drawable-nodpi/startup_screen_final.webp' > /tmp/startup.webp
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('/tmp/startup.webp')
+          data = p.read_bytes()
+          if not (len(data) > 10000 and data[:4] == b'RIFF' and data[8:12] == b'WEBP'):
+              raise RuntimeError('Packaged startup artwork failed WebP validation')
+          print('Packaged startup WebP validated:', len(data), 'bytes')
+          PY
 
       - name: Rename APK
         run: cp android-dfam/app/build/outputs/apk/debug/app-debug.apk 3rdi-Analog-Percussion-v2.0.apk
