@@ -36,49 +36,7 @@ jobs:
           yes | "$SDKMANAGER" --licenses >/dev/null || true
           "$SDKMANAGER" 'platform-tools' 'platforms;android-35' 'build-tools;35.0.0'
 
-      - name: Recover startup artwork as Android drawable
-        shell: bash
-        run: |
-          python3 -m pip install --quiet pillow
-          python3 - <<'PY'
-          from pathlib import Path
-          import base64, io
-          from PIL import Image, ImageFile
-
-          raw_path = Path('android-dfam/app/src/main/res/raw/startup_background_b64_v17.txt')
-          raw = raw_path.read_text()
-          alphabet = set('ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=')
-          clean = ''.join(ch for ch in raw if ch in alphabet)
-          clean += '=' * ((-len(clean)) % 4)
-          data = base64.b64decode(clean, validate=False)
-          if not data.startswith(b'\xff\xd8'):
-              raise RuntimeError('Startup artwork has no JPEG SOI marker')
-
-          ImageFile.LOAD_TRUNCATED_IMAGES = True
-          try:
-              image = Image.open(io.BytesIO(data)).convert('RGB')
-              image.load()
-          except Exception as exc:
-              raise RuntimeError(f'Could not recover truncated startup JPEG: {exc}')
-
-          out = Path('android-dfam/app/src/main/res/drawable-nodpi/startup_screen_v17.jpg')
-          out.parent.mkdir(parents=True, exist_ok=True)
-          image.save(out, format='JPEG', quality=88, optimize=True, progressive=False)
-          repaired = out.read_bytes()
-          if not (repaired.startswith(b'\xff\xd8') and repaired.endswith(b'\xff\xd9')):
-              raise RuntimeError('Re-encoded startup artwork is not a valid JPEG')
-          print(f'Recovered startup artwork: {image.size[0]}x{image.size[1]}, {len(repaired)} bytes')
-
-          # The artwork is now a binary drawable; skip the obsolete Base64
-          # conversion block in the integration script for this CI run.
-          patch = Path('android-dfam/apply_v13.py')
-          text = patch.read_text()
-          marker_start = text.index('# Build the startup artwork into a real Android drawable.')
-          marker_end = text.index('s = main.read_text()')
-          patch.write_text(text[:marker_start] + text[marker_end:])
-          PY
-
-      - name: Apply fullscreen theme and preset integration
+      - name: Prepare verified startup artwork and synth integration
         run: python3 android-dfam/apply_v13.py
 
       - name: Set up Gradle
@@ -91,12 +49,12 @@ jobs:
         run: gradle --no-daemon :app:assembleDebug
 
       - name: Rename APK
-        run: cp android-dfam/app/build/outputs/apk/debug/app-debug.apk 3rdi-Analog-Percussion-v1.8.apk
+        run: cp android-dfam/app/build/outputs/apk/debug/app-debug.apk 3rdi-Analog-Percussion-v1.9.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: 3rdi-Analog-Percussion-v1.8-APK
-          path: 3rdi-Analog-Percussion-v1.8.apk
+          name: 3rdi-Analog-Percussion-v1.9-APK
+          path: 3rdi-Analog-Percussion-v1.9.apk
           if-no-files-found: error
           retention-days: 30
