@@ -3,11 +3,14 @@ package com.threerdi.dfamstyle;
 import android.app.Activity;
 import android.content.Intent;
 import android.graphics.Color;
+import android.graphics.Typeface;
 import android.os.Bundle;
+import android.view.Gravity;
 import android.view.View;
 import android.view.Window;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
+import android.widget.TextView;
 
 public final class StartupActivity extends Activity {
     private static final float ART_W = 360f;
@@ -23,6 +26,7 @@ public final class StartupActivity extends Activity {
 
     private final class StartupLayout extends FrameLayout {
         private final ImageView background;
+        private final TextView versionLabel;
         private final View startButton;
         private final View presetsButton;
         private final View audioButton;
@@ -38,6 +42,15 @@ public final class StartupActivity extends Activity {
             background.setScaleType(ImageView.ScaleType.FIT_XY);
             background.setContentDescription("3rdi Analog Percussion startup artwork");
             addView(background, new FrameLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
+
+            versionLabel = new TextView(StartupActivity.this);
+            versionLabel.setText("v2.0");
+            versionLabel.setTextColor(Color.rgb(241, 224, 184));
+            versionLabel.setBackgroundColor(Color.rgb(5, 5, 7));
+            versionLabel.setTextSize(9f);
+            versionLabel.setTypeface(Typeface.DEFAULT_BOLD);
+            versionLabel.setGravity(Gravity.CENTER);
+            addView(versionLabel);
 
             startButton = touchZone();
             presetsButton = touchZone();
@@ -75,6 +88,7 @@ public final class StartupActivity extends Activity {
             int w = right - left;
             int h = bottom - top;
             background.layout(0, 0, w, h);
+            layoutArt(versionLabel, 5, 5, 35, 21, w, h);
             layoutArt(startButton, 104, 311, 258, 354, w, h);
             layoutArt(presetsButton, 104, 360, 258, 401, w, h);
             layoutArt(audioButton, 104, 407, 258, 449, w, h);
