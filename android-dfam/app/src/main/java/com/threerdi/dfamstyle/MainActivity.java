@@ -3,17 +3,20 @@ package com.threerdi.dfamstyle;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Context;
+import android.content.Intent;
 import android.content.pm.ActivityInfo;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.RectF;
+import android.graphics.Typeface;
 import android.media.AudioAttributes;
 import android.media.AudioFormat;
 import android.media.AudioManager;
 import android.media.AudioTrack;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Process;
 import android.text.InputType;
 import android.view.MotionEvent;
 import android.view.View;
@@ -33,7 +36,7 @@ public final class MainActivity extends Activity {
         super.onCreate(savedInstanceState);
         requestWindowFeature(Window.FEATURE_NO_TITLE);
         setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
-        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        applyScreenPreference();
         synthView = new SynthView(this);
         setContentView(synthView);
     }
@@ -41,6 +44,7 @@ public final class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        applyScreenPreference();
         if (synthView != null) synthView.startAudio();
     }
 
@@ -50,18 +54,33 @@ public final class MainActivity extends Activity {
         super.onPause();
     }
 
+    private void applyScreenPreference() {
+        if (AudioPreferences.keepScreenOn(this)) {
+            getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        } else {
+            getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        }
+    }
+
     static final class SynthView extends View {
         private static final float DW = 1200f;
         private static final float DH = 720f;
+        private static final int SAND = Color.rgb(218, 198, 165);
+        private static final int SAND_LIGHT = Color.rgb(229, 213, 188);
+        private static final int SAND_DARK = Color.rgb(188, 164, 128);
+        private static final int ORANGE = Color.rgb(224, 111, 36);
+        private static final int ORANGE_DARK = Color.rgb(187, 79, 22);
+        private static final int BLACK = Color.rgb(18, 18, 16);
 
         private final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final RectF tempoRect = new RectF(60, 140, 170, 207);
-        private final RectF runRect = new RectF(865, 610, 980, 675);
-        private final RectF trigRect = new RectF(995, 610, 1085, 675);
-        private final RectF randomRect = new RectF(1095, 610, 1180, 675);
+        private final RectF tempoRect = new RectF(58, 143, 160, 199);
+        private final RectF prefsRect = new RectF(1012, 58, 1140, 101);
+        private final RectF runRect = new RectF(890, 618, 985, 671);
+        private final RectF trigRect = new RectF(995, 618, 1080, 671);
+        private final RectF randomRect = new RectF(1090, 618, 1172, 671);
         private final Random random = new Random();
 
-        volatile float tempo = 132f;
+        volatile float tempo;
         volatile float vco1 = 62f;
         volatile float detune = 7f;
         volatile float fm = 0.28f;
@@ -72,14 +91,12 @@ public final class MainActivity extends Activity {
         volatile float vcaDecay = 330f;
         volatile float drive = 2.2f;
 
-        // Expanded modulation section.
         volatile float lfoRate = 3.0f;
-        volatile float lfoPitch = 0.0f;       // semitones, bipolar
-        volatile float lfoFilter = 0.0f;      // octaves, bipolar
-        volatile float lfoFm = 0.0f;          // extra FM depth
+        volatile float lfoPitch = 0.0f;
+        volatile float lfoFilter = 0.0f;
+        volatile float lfoFm = 0.0f;
         volatile float filterEnvAmount = 5.5f;
-        volatile float pitchEnvAmount = 0.0f; // semitones, bipolar
-
+        volatile float pitchEnvAmount = 0.0f;
         volatile boolean running = true;
 
         final float[] stepPitch = {0f, 0f, 7f, -5f, 0f, 12f, -2f, 5f};
@@ -94,7 +111,8 @@ public final class MainActivity extends Activity {
 
         SynthView(Context context) {
             super(context);
-            setBackgroundColor(Color.rgb(10, 10, 10));
+            tempo = AudioPreferences.defaultBpm(context);
+            setBackgroundColor(SAND_DARK);
             setFocusable(true);
         }
 
@@ -123,37 +141,42 @@ public final class MainActivity extends Activity {
             canvas.scale(canvasScale, canvasScale);
 
             p.setStyle(Paint.Style.FILL);
-            p.setColor(Color.rgb(19, 20, 21));
-            canvas.drawRoundRect(new RectF(16, 16, 1184, 704), 20, 20, p);
-
-            p.setColor(Color.rgb(235, 233, 220));
-            canvas.drawRoundRect(new RectF(34, 34, 1166, 686), 15, 15, p);
-
-            p.setColor(Color.rgb(18, 18, 18));
-            canvas.drawRoundRect(new RectF(48, 48, 1152, 672), 12, 12, p);
+            p.setColor(SAND_DARK);
+            canvas.drawRoundRect(new RectF(14, 14, 1186, 706), 22, 22, p);
+            p.setColor(SAND);
+            canvas.drawRoundRect(new RectF(28, 28, 1172, 692), 17, 17, p);
+            p.setColor(SAND_LIGHT);
+            canvas.drawRoundRect(new RectF(45, 45, 1155, 675), 12, 12, p);
 
             drawTitle(canvas);
             drawTempoBox(canvas);
 
-            drawKnob(canvas, 225, 175, 54, logNorm(vco1, 28, 440), "VCO 1", formatHz(vco1));
-            drawKnob(canvas, 360, 175, 54, norm(detune, -24, 24), "VCO 2", String.format(Locale.US, "%+.1f st", detune));
-            drawKnob(canvas, 495, 175, 54, fm, "FM", String.format(Locale.US, "%.0f%%", fm * 100));
-            drawKnob(canvas, 630, 175, 54, noise, "NOISE", String.format(Locale.US, "%.0f%%", noise * 100));
-            drawKnob(canvas, 765, 175, 54, logNorm(cutoff, 70, 12000), "CUTOFF", formatHz(cutoff));
-            drawKnob(canvas, 900, 175, 54, resonance, "RESONANCE", String.format(Locale.US, "%.0f%%", resonance * 100));
-            drawKnob(canvas, 1035, 175, 54, norm(vcfDecay, 35, 2400), "VCF DECAY", String.format(Locale.US, "%.0f ms", vcfDecay));
-            drawKnob(canvas, 1130, 175, 43, norm(vcaDecay, 35, 2400), "VCA", String.format(Locale.US, "%.0f", vcaDecay));
+            float[] topX = {220, 345, 470, 595, 720, 845, 970, 1095};
+            drawKnob(canvas, topX[0], 170, 34, logNorm(vco1, 28, 440), "VCO 1", formatHz(vco1));
+            drawKnob(canvas, topX[1], 170, 34, norm(detune, -24, 24), "VCO 2", String.format(Locale.US, "%+.1f st", detune));
+            drawKnob(canvas, topX[2], 170, 34, fm, "FM", String.format(Locale.US, "%.0f%%", fm * 100));
+            drawKnob(canvas, topX[3], 170, 34, noise, "NOISE", String.format(Locale.US, "%.0f%%", noise * 100));
+            drawKnob(canvas, topX[4], 170, 34, logNorm(cutoff, 70, 12000), "CUTOFF", formatHz(cutoff));
+            drawKnob(canvas, topX[5], 170, 34, resonance, "RESONANCE", String.format(Locale.US, "%.0f%%", resonance * 100));
+            drawKnob(canvas, topX[6], 170, 34, norm(vcfDecay, 35, 2400), "VCF DECAY", String.format(Locale.US, "%.0f ms", vcfDecay));
+            drawKnob(canvas, topX[7], 170, 34, norm(vcaDecay, 35, 2400), "VCA DECAY", String.format(Locale.US, "%.0f ms", vcaDecay));
 
-            p.setColor(Color.rgb(70, 70, 70));
-            canvas.drawRect(64, 272, 1136, 275, p);
+            p.setColor(BLACK);
+            p.setAlpha(80);
+            canvas.drawRect(62, 251, 1138, 253, p);
+            p.setAlpha(255);
 
             int currentStep = engine == null ? -1 : engine.currentStep;
             for (int i = 0; i < 8; i++) {
-                float x = 118 + i * 133f;
+                float x = 112 + i * 139f;
                 drawStep(canvas, i, x, currentStep == i);
             }
 
-            drawBottomDivider(canvas);
+            p.setColor(BLACK);
+            p.setAlpha(70);
+            canvas.drawRect(62, 548, 1138, 550, p);
+            p.setAlpha(255);
+
             drawDrive(canvas);
             drawModulation(canvas);
             drawButtons(canvas);
@@ -163,48 +186,42 @@ public final class MainActivity extends Activity {
         }
 
         private void drawTitle(Canvas c) {
-            p.setTypeface(android.graphics.Typeface.create("sans-serif-condensed", android.graphics.Typeface.BOLD));
             p.setTextAlign(Paint.Align.LEFT);
-            p.setColor(Color.rgb(236, 236, 226));
-            p.setTextSize(35);
-            c.drawText("3RDI ANALOG PERCUSSION", 70, 92, p);
-            p.setTextSize(16);
-            p.setColor(Color.rgb(145, 145, 140));
-            c.drawText("DFAM-STYLE DUAL OSCILLATOR / FILTER / 8-STEP SYNTH", 70, 118, p);
-            p.setTextAlign(Paint.Align.RIGHT);
-            p.setColor(Color.rgb(210, 75, 42));
-            p.setTextSize(18);
-            c.drawText("LIVE ENGINE", 1128, 92, p);
-            p.setTextAlign(Paint.Align.LEFT);
+            p.setTypeface(Typeface.create("sans-serif-condensed", Typeface.BOLD));
+            p.setColor(BLACK);
+            p.setTextSize(31);
+            c.drawText("3RDI ANALOG PERCUSSION", 67, 88, p);
+            p.setTypeface(Typeface.DEFAULT_BOLD);
+            p.setTextSize(11.5f);
+            c.drawText("DUAL OSCILLATOR / FILTER / MODULATION / 8-STEP PERCUSSION SYNTH", 68, 111, p);
+            drawButton(c, prefsRect, "PREFERENCES", false);
         }
 
         private void drawTempoBox(Canvas c) {
             p.setStyle(Paint.Style.FILL);
-            p.setColor(Color.rgb(34, 34, 34));
-            c.drawRoundRect(tempoRect, 9, 9, p);
+            p.setColor(SAND);
+            c.drawRoundRect(tempoRect, 8, 8, p);
             p.setStyle(Paint.Style.STROKE);
             p.setStrokeWidth(2.5f);
-            p.setColor(Color.rgb(188, 70, 42));
-            c.drawRoundRect(tempoRect, 9, 9, p);
+            p.setColor(ORANGE);
+            c.drawRoundRect(tempoRect, 8, 8, p);
             p.setStyle(Paint.Style.FILL);
 
             p.setTextAlign(Paint.Align.CENTER);
-            p.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
-            p.setColor(Color.rgb(237, 237, 226));
-            p.setTextSize(28);
+            p.setTypeface(Typeface.DEFAULT_BOLD);
+            p.setColor(BLACK);
+            p.setTextSize(25);
             String bpm = Math.abs(tempo - Math.round(tempo)) < 0.01f
                     ? String.format(Locale.US, "%.0f", tempo)
                     : String.format(Locale.US, "%.1f", tempo);
             c.drawText(bpm, tempoRect.centerX(), tempoRect.centerY() + 4, p);
-            p.setTextSize(11);
-            p.setColor(Color.rgb(150, 150, 145));
-            c.drawText("BPM", tempoRect.centerX(), tempoRect.bottom - 8, p);
-            p.setTextSize(15);
-            p.setColor(Color.rgb(213, 213, 204));
-            c.drawText("TEMPO", tempoRect.centerX(), 249, p);
-            p.setTextSize(12);
-            p.setColor(Color.rgb(125, 125, 121));
-            c.drawText("TAP TO TYPE", tempoRect.centerX(), 267, p);
+            p.setTextSize(9.5f);
+            c.drawText("BPM", tempoRect.centerX(), tempoRect.bottom - 5, p);
+            p.setTextSize(11.5f);
+            c.drawText("TEMPO", tempoRect.centerX(), 220, p);
+            p.setTypeface(Typeface.DEFAULT);
+            p.setTextSize(9.5f);
+            c.drawText("TAP TO TYPE", tempoRect.centerX(), 235, p);
         }
 
         private void showTempoDialog() {
@@ -238,140 +255,138 @@ public final class MainActivity extends Activity {
                 edit.postDelayed(() -> {
                     InputMethodManager imm = (InputMethodManager) getContext().getSystemService(Context.INPUT_METHOD_SERVICE);
                     if (imm != null) imm.showSoftInput(edit, InputMethodManager.SHOW_IMPLICIT);
-                }, 150);
+                }, 120);
             });
-            dialog.getWindow();
             dialog.show();
         }
 
         private void drawStep(Canvas c, int index, float x, boolean active) {
             if (active) {
-                p.setColor(Color.rgb(214, 72, 37));
-                c.drawCircle(x, 305, 13, p);
+                p.setStyle(Paint.Style.FILL);
+                p.setColor(ORANGE);
+                c.drawCircle(x, 286, 9, p);
             } else {
                 p.setStyle(Paint.Style.STROKE);
-                p.setStrokeWidth(3);
-                p.setColor(Color.rgb(95, 95, 95));
-                c.drawCircle(x, 305, 11, p);
+                p.setStrokeWidth(2);
+                p.setColor(BLACK);
+                c.drawCircle(x, 286, 7, p);
                 p.setStyle(Paint.Style.FILL);
             }
 
             p.setTextAlign(Paint.Align.CENTER);
-            p.setColor(Color.rgb(200, 200, 194));
-            p.setTextSize(18);
-            p.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
-            c.drawText(String.valueOf(index + 1), x, 311, p);
+            p.setTypeface(Typeface.DEFAULT_BOLD);
+            p.setColor(BLACK);
+            p.setTextSize(13);
+            c.drawText(String.valueOf(index + 1), x, 316, p);
 
-            drawMiniKnob(c, x, 390, 39, norm(stepPitch[index], -24, 24), "PITCH", String.format(Locale.US, "%+.1f", stepPitch[index]));
-            drawMiniKnob(c, x, 515, 39, stepVelocity[index], "VEL", String.format(Locale.US, "%.0f%%", stepVelocity[index] * 100));
+            drawMiniKnob(c, x, 370, 21, norm(stepPitch[index], -24, 24), "PITCH", String.format(Locale.US, "%+.1f", stepPitch[index]));
+            drawMiniKnob(c, x, 472, 21, stepVelocity[index], "VELOCITY", String.format(Locale.US, "%.0f%%", stepVelocity[index] * 100));
         }
 
         private void drawKnob(Canvas c, float cx, float cy, float r, float value, String label, String valueText) {
             value = clamp(value, 0f, 1f);
             p.setStyle(Paint.Style.FILL);
-            p.setColor(Color.rgb(44, 44, 44));
+            p.setColor(ORANGE);
             c.drawCircle(cx, cy, r, p);
-            p.setColor(Color.rgb(23, 23, 23));
-            c.drawCircle(cx, cy, r * 0.77f, p);
+            p.setColor(ORANGE_DARK);
+            c.drawCircle(cx, cy, r * 0.68f, p);
 
             double a = Math.toRadians(135 + 270 * value);
-            float px = cx + (float) Math.cos(a) * r * 0.58f;
-            float py = cy + (float) Math.sin(a) * r * 0.58f;
-            p.setStrokeWidth(5);
+            p.setStrokeWidth(3.6f);
             p.setStrokeCap(Paint.Cap.ROUND);
-            p.setColor(Color.rgb(225, 225, 213));
-            c.drawLine(cx, cy, px, py, p);
+            p.setColor(BLACK);
+            c.drawLine(cx, cy,
+                    cx + (float) Math.cos(a) * r * 0.57f,
+                    cy + (float) Math.sin(a) * r * 0.57f, p);
 
             p.setTextAlign(Paint.Align.CENTER);
-            p.setColor(Color.rgb(213, 213, 204));
-            p.setTextSize(15);
-            p.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
-            c.drawText(label, cx, cy + r + 27, p);
-            p.setTextSize(13);
-            p.setColor(Color.rgb(137, 137, 132));
-            c.drawText(valueText, cx, cy + r + 47, p);
+            p.setTypeface(Typeface.DEFAULT_BOLD);
+            p.setTextSize(11.5f);
+            p.setColor(BLACK);
+            c.drawText(label, cx, cy + r + 19, p);
+            p.setTypeface(Typeface.DEFAULT);
+            p.setTextSize(10.5f);
+            c.drawText(valueText, cx, cy + r + 34, p);
         }
 
         private void drawMiniKnob(Canvas c, float cx, float cy, float r, float value, String label, String valueText) {
             value = clamp(value, 0f, 1f);
             p.setStyle(Paint.Style.FILL);
-            p.setColor(Color.rgb(54, 54, 54));
+            p.setColor(ORANGE);
             c.drawCircle(cx, cy, r, p);
-            p.setColor(Color.rgb(21, 21, 21));
-            c.drawCircle(cx, cy, r * 0.72f, p);
+            p.setColor(ORANGE_DARK);
+            c.drawCircle(cx, cy, r * 0.62f, p);
             double a = Math.toRadians(135 + 270 * value);
-            p.setStrokeWidth(4);
+            p.setStrokeWidth(2.5f);
             p.setStrokeCap(Paint.Cap.ROUND);
-            p.setColor(Color.rgb(229, 229, 216));
+            p.setColor(BLACK);
             c.drawLine(cx, cy,
-                    cx + (float) Math.cos(a) * r * 0.55f,
-                    cy + (float) Math.sin(a) * r * 0.55f, p);
+                    cx + (float) Math.cos(a) * r * 0.54f,
+                    cy + (float) Math.sin(a) * r * 0.54f, p);
             p.setTextAlign(Paint.Align.CENTER);
-            p.setTextSize(13);
-            p.setColor(Color.rgb(188, 188, 181));
-            c.drawText(label, cx, cy + r + 20, p);
-            p.setTextSize(12);
-            p.setColor(Color.rgb(125, 125, 121));
-            c.drawText(valueText, cx, cy + r + 37, p);
+            p.setTypeface(Typeface.DEFAULT_BOLD);
+            p.setTextSize(9.5f);
+            p.setColor(BLACK);
+            c.drawText(label, cx, cy + r + 16, p);
+            p.setTypeface(Typeface.DEFAULT);
+            p.setTextSize(9.5f);
+            c.drawText(valueText, cx, cy + r + 30, p);
         }
 
         private void drawCompactKnob(Canvas c, float cx, float cy, float value, String label, String valueText) {
-            float r = 24f;
+            float r = 27f;
             value = clamp(value, 0f, 1f);
             p.setStyle(Paint.Style.FILL);
-            p.setColor(Color.rgb(56, 56, 56));
+            p.setColor(ORANGE);
             c.drawCircle(cx, cy, r, p);
-            p.setColor(Color.rgb(20, 20, 20));
-            c.drawCircle(cx, cy, 17f, p);
+            p.setColor(ORANGE_DARK);
+            c.drawCircle(cx, cy, 18f, p);
             double a = Math.toRadians(135 + 270 * value);
-            p.setStrokeWidth(3.5f);
+            p.setStrokeWidth(3f);
             p.setStrokeCap(Paint.Cap.ROUND);
-            p.setColor(Color.rgb(221, 221, 210));
+            p.setColor(BLACK);
             c.drawLine(cx, cy,
-                    cx + (float) Math.cos(a) * 13f,
-                    cy + (float) Math.sin(a) * 13f, p);
+                    cx + (float) Math.cos(a) * 14f,
+                    cy + (float) Math.sin(a) * 14f, p);
 
             p.setTextAlign(Paint.Align.CENTER);
-            p.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
-            p.setTextSize(10.5f);
-            p.setColor(Color.rgb(182, 182, 175));
-            c.drawText(label, cx, cy - 37, p);
-            p.setTypeface(android.graphics.Typeface.DEFAULT);
-            p.setTextSize(10.5f);
-            p.setColor(Color.rgb(132, 132, 127));
-            c.drawText(valueText, cx, cy + 42, p);
-        }
-
-        private void drawBottomDivider(Canvas c) {
-            p.setColor(Color.rgb(54, 54, 54));
-            c.drawRect(64, 574, 1136, 576, p);
+            p.setTypeface(Typeface.DEFAULT_BOLD);
+            p.setTextSize(9.5f);
+            p.setColor(BLACK);
+            c.drawText(label, cx, cy - 40, p);
+            p.setTypeface(Typeface.DEFAULT);
+            p.setTextSize(9f);
+            c.drawText(valueText, cx, cy + 43, p);
         }
 
         private void drawDrive(Canvas c) {
             p.setTextAlign(Paint.Align.LEFT);
-            p.setColor(Color.rgb(175, 175, 168));
-            p.setTextSize(13);
-            p.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
-            c.drawText("DRIVE", 70, 609, p);
-            RectF bar = new RectF(70, 621, 350, 643);
-            p.setColor(Color.rgb(46, 46, 46));
-            c.drawRoundRect(bar, 11, 11, p);
+            p.setTypeface(Typeface.DEFAULT_BOLD);
+            p.setColor(BLACK);
+            p.setTextSize(11.5f);
+            c.drawText("DRIVE", 68, 594, p);
+            RectF bar = new RectF(68, 606, 315, 625);
+            p.setColor(SAND_DARK);
+            c.drawRoundRect(bar, 10, 10, p);
             float amount = norm(drive, 1f, 6f);
-            p.setColor(Color.rgb(213, 74, 40));
-            c.drawRoundRect(new RectF(bar.left, bar.top, bar.left + bar.width() * amount, bar.bottom), 11, 11, p);
-            p.setColor(Color.rgb(160, 160, 155));
-            p.setTextSize(12);
-            c.drawText(String.format(Locale.US, "%.1fx", drive), 360, 638, p);
+            p.setColor(ORANGE);
+            c.drawRoundRect(new RectF(bar.left, bar.top, bar.left + bar.width() * amount, bar.bottom), 10, 10, p);
+            p.setColor(BLACK);
+            p.setTypeface(Typeface.DEFAULT);
+            p.setTextSize(10.5f);
+            c.drawText(String.format(Locale.US, "%.1fx", drive), 325, 620, p);
+            p.setTextSize(9f);
+            c.drawText("DRAG BAR UP / DOWN", 68, 642, p);
         }
 
         private void drawModulation(Canvas c) {
-            float[] x = {430, 505, 580, 655, 730, 805};
-            drawCompactKnob(c, x[0], 618, logNorm(lfoRate, 0.05f, 30f), "LFO RATE", formatLfoRate(lfoRate));
-            drawCompactKnob(c, x[1], 618, norm(lfoPitch, -12f, 12f), "LFO>PITCH", String.format(Locale.US, "%+.1f st", lfoPitch));
-            drawCompactKnob(c, x[2], 618, norm(lfoFilter, -3f, 3f), "LFO>VCF", String.format(Locale.US, "%+.1f oct", lfoFilter));
-            drawCompactKnob(c, x[3], 618, lfoFm, "LFO>FM", String.format(Locale.US, "%.0f%%", lfoFm * 100f));
-            drawCompactKnob(c, x[4], 618, norm(filterEnvAmount, 0f, 10f), "VCF ENV", String.format(Locale.US, "%.1fx", filterEnvAmount));
-            drawCompactKnob(c, x[5], 618, norm(pitchEnvAmount, -24f, 24f), "PITCH ENV", String.format(Locale.US, "%+.1f st", pitchEnvAmount));
+            float[] x = {410, 485, 560, 635, 710, 785};
+            drawCompactKnob(c, x[0], 612, logNorm(lfoRate, 0.05f, 30f), "LFO RATE", formatLfoRate(lfoRate));
+            drawCompactKnob(c, x[1], 612, norm(lfoPitch, -12f, 12f), "LFO>PITCH", String.format(Locale.US, "%+.1f st", lfoPitch));
+            drawCompactKnob(c, x[2], 612, norm(lfoFilter, -3f, 3f), "LFO>VCF", String.format(Locale.US, "%+.1f oct", lfoFilter));
+            drawCompactKnob(c, x[3], 612, lfoFm, "LFO>FM", String.format(Locale.US, "%.0f%%", lfoFm * 100f));
+            drawCompactKnob(c, x[4], 612, norm(filterEnvAmount, 0f, 10f), "VCF ENV", String.format(Locale.US, "%.1fx", filterEnvAmount));
+            drawCompactKnob(c, x[5], 612, norm(pitchEnvAmount, -24f, 24f), "PITCH ENV", String.format(Locale.US, "%+.1f st", pitchEnvAmount));
         }
 
         private void drawButtons(Canvas c) {
@@ -381,18 +396,19 @@ public final class MainActivity extends Activity {
         }
 
         private void drawButton(Canvas c, RectF r, String text, boolean lit) {
-            p.setColor(lit ? Color.rgb(178, 55, 29) : Color.rgb(48, 48, 48));
-            c.drawRoundRect(r, 10, 10, p);
+            p.setStyle(Paint.Style.FILL);
+            p.setColor(lit ? ORANGE : SAND);
+            c.drawRoundRect(r, 8, 8, p);
             p.setStyle(Paint.Style.STROKE);
             p.setStrokeWidth(2);
-            p.setColor(Color.rgb(100, 100, 96));
-            c.drawRoundRect(r, 10, 10, p);
+            p.setColor(ORANGE);
+            c.drawRoundRect(r, 8, 8, p);
             p.setStyle(Paint.Style.FILL);
             p.setTextAlign(Paint.Align.CENTER);
-            p.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
-            p.setTextSize(16);
-            p.setColor(Color.rgb(235, 235, 224));
-            c.drawText(text, r.centerX(), r.centerY() + 6, p);
+            p.setTypeface(Typeface.DEFAULT_BOLD);
+            p.setTextSize(12f);
+            p.setColor(BLACK);
+            c.drawText(text, r.centerX(), r.centerY() + 4, p);
         }
 
         @Override
@@ -403,6 +419,10 @@ public final class MainActivity extends Activity {
             if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
                 if (tempoRect.contains(x, y)) {
                     showTempoDialog();
+                    return true;
+                }
+                if (prefsRect.contains(x, y)) {
+                    getContext().startActivity(new Intent(getContext(), SettingsActivity.class));
                     return true;
                 }
                 if (runRect.contains(x, y)) {
@@ -442,21 +462,20 @@ public final class MainActivity extends Activity {
         }
 
         private int hitControl(float x, float y) {
-            float[] topX = {225, 360, 495, 630, 765, 900, 1035, 1130};
+            float[] topX = {220, 345, 470, 595, 720, 845, 970, 1095};
             for (int i = 0; i < topX.length; i++) {
-                float r = i == 7 ? 56 : 68;
-                if (dist2(x, y, topX[i], 175) <= r * r) return i + 1;
+                if (dist2(x, y, topX[i], 170) <= 46 * 46) return i + 1;
             }
             for (int i = 0; i < 8; i++) {
-                float sx = 118 + i * 133f;
-                if (dist2(x, y, sx, 390) <= 55 * 55) return 20 + i;
-                if (dist2(x, y, sx, 515) <= 55 * 55) return 30 + i;
+                float sx = 112 + i * 139f;
+                if (dist2(x, y, sx, 370) <= 32 * 32) return 20 + i;
+                if (dist2(x, y, sx, 472) <= 32 * 32) return 30 + i;
             }
-            if (x >= 65 && x <= 380 && y >= 590 && y <= 655) return 10;
+            if (x >= 62 && x <= 350 && y >= 580 && y <= 650) return 10;
 
-            float[] modX = {430, 505, 580, 655, 730, 805};
+            float[] modX = {410, 485, 560, 635, 710, 785};
             for (int i = 0; i < modX.length; i++) {
-                if (dist2(x, y, modX[i], 618) <= 38 * 38) return 40 + i;
+                if (dist2(x, y, modX[i], 612) <= 38 * 38) return 40 + i;
             }
             return -1;
         }
@@ -532,6 +551,10 @@ public final class MainActivity extends Activity {
         private final SynthView s;
         private final Thread thread;
         private final Random noiseGen = new Random();
+        private final int requestedSampleRate;
+        private final int bufferProfile;
+        private final boolean requestLowLatency;
+        private final float masterGain;
 
         private volatile boolean alive = true;
         private volatile boolean forceTrigger = false;
@@ -552,6 +575,10 @@ public final class MainActivity extends Activity {
 
         SynthEngine(SynthView synthView) {
             s = synthView;
+            requestedSampleRate = AudioPreferences.sampleRate(s.getContext());
+            bufferProfile = AudioPreferences.bufferProfile(s.getContext());
+            requestLowLatency = AudioPreferences.lowLatency(s.getContext());
+            masterGain = Math.max(0.25f, Math.min(1.2f, AudioPreferences.masterGain(s.getContext())));
             thread = new Thread(this, "3rdi-synth-audio");
             thread.setPriority(Thread.MAX_PRIORITY);
         }
@@ -563,7 +590,7 @@ public final class MainActivity extends Activity {
         void shutdown() {
             alive = false;
             try {
-                thread.join(400);
+                thread.join(500);
             } catch (InterruptedException ignored) {
                 Thread.currentThread().interrupt();
             }
@@ -581,16 +608,47 @@ public final class MainActivity extends Activity {
 
         @Override
         public void run() {
-            sampleRate = AudioTrack.getNativeOutputSampleRate(AudioManager.STREAM_MUSIC);
-            if (sampleRate < 22050) sampleRate = 48000;
-            int min = AudioTrack.getMinBufferSize(sampleRate,
+            Process.setThreadPriority(Process.THREAD_PRIORITY_AUDIO);
+            int nativeRate = AudioTrack.getNativeOutputSampleRate(AudioManager.STREAM_MUSIC);
+            if (nativeRate < 22050) nativeRate = 48000;
+            sampleRate = requestedSampleRate > 0 ? requestedSampleRate : nativeRate;
+
+            track = buildTrack(sampleRate, requestLowLatency);
+            if (track == null && sampleRate != nativeRate) {
+                sampleRate = nativeRate;
+                track = buildTrack(sampleRate, requestLowLatency);
+            }
+            if (track == null) {
+                sampleRate = nativeRate;
+                track = buildTrack(sampleRate, false);
+            }
+            if (track == null) return;
+
+            short[] out = new short[256];
+            try {
+                track.play();
+                while (alive) {
+                    render(out);
+                    int written = track.write(out, 0, out.length, AudioTrack.WRITE_BLOCKING);
+                    if (written < 0) break;
+                }
+            } catch (Exception ignored) {
+            } finally {
+                releaseTrack();
+            }
+        }
+
+        private AudioTrack buildTrack(int rate, boolean lowLatency) {
+            int min = AudioTrack.getMinBufferSize(rate,
                     AudioFormat.CHANNEL_OUT_MONO,
                     AudioFormat.ENCODING_PCM_16BIT);
-            int bufferBytes = Math.max(min * 2, 4096);
+            if (min <= 0) return null;
+            int multiplier = bufferProfile <= 0 ? 1 : bufferProfile == 1 ? 2 : 4;
+            int bufferBytes = Math.max(min * multiplier, 2048);
 
             AudioFormat format = new AudioFormat.Builder()
                     .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-                    .setSampleRate(sampleRate)
+                    .setSampleRate(rate)
                     .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
                     .build();
             AudioAttributes attrs = new AudioAttributes.Builder()
@@ -598,37 +656,43 @@ public final class MainActivity extends Activity {
                     .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
                     .build();
 
-            AudioTrack.Builder b = new AudioTrack.Builder()
-                    .setAudioAttributes(attrs)
-                    .setAudioFormat(format)
-                    .setBufferSizeInBytes(bufferBytes)
-                    .setTransferMode(AudioTrack.MODE_STREAM);
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                b.setPerformanceMode(AudioTrack.PERFORMANCE_MODE_LOW_LATENCY);
-            }
-            track = b.build();
-            short[] out = new short[256];
-
             try {
-                track.play();
-                while (alive) {
-                    render(out);
-                    track.write(out, 0, out.length, AudioTrack.WRITE_BLOCKING);
+                AudioTrack.Builder b = new AudioTrack.Builder()
+                        .setAudioAttributes(attrs)
+                        .setAudioFormat(format)
+                        .setBufferSizeInBytes(bufferBytes)
+                        .setTransferMode(AudioTrack.MODE_STREAM);
+                if (lowLatency && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    b.setPerformanceMode(AudioTrack.PERFORMANCE_MODE_LOW_LATENCY);
+                }
+                return b.build();
+            } catch (Exception first) {
+                if (lowLatency) {
+                    try {
+                        return new AudioTrack.Builder()
+                                .setAudioAttributes(attrs)
+                                .setAudioFormat(format)
+                                .setBufferSizeInBytes(bufferBytes)
+                                .setTransferMode(AudioTrack.MODE_STREAM)
+                                .build();
+                    } catch (Exception ignored) {
+                    }
+                }
+            }
+            return null;
+        }
+
+        private void releaseTrack() {
+            try {
+                if (track != null) {
+                    track.pause();
+                    track.flush();
+                    track.stop();
+                    track.release();
                 }
             } catch (Exception ignored) {
-                // Keep app alive if an OEM audio driver rejects low-latency mode.
-            } finally {
-                try {
-                    if (track != null) {
-                        track.pause();
-                        track.flush();
-                        track.stop();
-                        track.release();
-                    }
-                } catch (Exception ignored) {
-                }
-                track = null;
             }
+            track = null;
         }
 
         private void render(short[] out) {
@@ -690,7 +754,7 @@ public final class MainActivity extends Activity {
                     envFilter *= filtDecay;
                 }
 
-                int v = (int) (sample * 30000f);
+                int v = (int) (sample * 30000f * masterGain);
                 if (v > 32767) v = 32767;
                 if (v < -32768) v = -32768;
                 out[i] = (short) v;
