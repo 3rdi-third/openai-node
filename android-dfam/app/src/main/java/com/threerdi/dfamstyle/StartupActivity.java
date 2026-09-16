@@ -104,7 +104,7 @@ public final class StartupActivity extends Activity {
         root.addView(buttons, new LinearLayout.LayoutParams(-1, dp(68)));
 
         TextView footer = new TextView(this);
-        footer.setText("3rdi Analog Percussion v1.3");
+        footer.setText("3rdi Analog Percussion v1.4");
         footer.setTextColor(text);
         footer.setAlpha(0.5f);
         footer.setTextSize(10);
