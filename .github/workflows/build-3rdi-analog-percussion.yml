@@ -124,6 +124,9 @@ jobs:
       - name: Apply Bluetooth MIDI integration
         run: python3 android-dfam/apply_v22.py
 
+      - name: Apply BLE MIDI long-window PLL stability fix
+        run: python3 android-dfam/apply_v27.py
+
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
@@ -153,13 +156,14 @@ jobs:
           print('Packaged startup verified:', im.size, len(data), 'bytes')
           PY
 
-      - name: Verify BLE MIDI phase-lock, theme UI and launcher icon
+      - name: Verify BLE MIDI PLL, phase-lock, theme UI and launcher icon
         shell: bash
         run: |
           APK='android-dfam/app/build/outputs/apk/debug/app-debug.apk'
           grep -q 'BLUETOOTH_SCAN' android-dfam/app/src/main/AndroidManifest.xml
           grep -q 'CLOCKS_PER_BATCH = 3' android-dfam/app/src/main/java/com/threerdi/dfamstyle/BleMidiSyncManager.java
-          grep -q 'bleMidiClockBatchPacket' android-dfam/app/src/main/java/com/threerdi/dfamstyle/BleMidiSyncManager.java
+          grep -q 'PLL_WINDOW_PULSES = 48' android-dfam/app/src/main/java/com/threerdi/dfamstyle/BleMidiSyncManager.java
+          grep -q 'lastPacketHash' android-dfam/app/src/main/java/com/threerdi/dfamstyle/BleMidiSyncManager.java
           grep -q 'getIncomingClockCount' android-dfam/app/src/main/java/com/threerdi/dfamstyle/BleMidiSyncManager.java
           grep -q 'externalClockCount / 12L' android-dfam/app/src/main/java/com/threerdi/dfamstyle/MainActivity.java
           grep -q 'leftScroll.setFillViewport(true)' android-dfam/app/src/main/java/com/threerdi/dfamstyle/BluetoothMidiActivity.java
@@ -167,15 +171,15 @@ jobs:
           grep -q 'android:icon="@mipmap/ic_launcher"' android-dfam/app/src/main/AndroidManifest.xml
           unzip -l "$APK" | grep -q 'ic_launcher.png' || { echo 'Launcher icon missing from APK'; exit 1; }
           "$ANDROID_SDK_ROOT/build-tools/35.0.0/aapt" dump badging "$APK" | grep -q 'application-icon' || { echo 'APK has no launcher icon metadata'; exit 1; }
-          echo 'BLE MIDI timestamp batching, phase-lock, theme UI and tiger launcher icon verified.'
+          echo 'BLE MIDI long-window PLL, phase-lock, theme UI and tiger launcher icon verified.'
 
       - name: Rename APK
-        run: cp android-dfam/app/build/outputs/apk/debug/app-debug.apk 3rdi-Analog-Percussion-v2.6-BLE-MIDI-Sync-Fix.apk
+        run: cp android-dfam/app/build/outputs/apk/debug/app-debug.apk 3rdi-Analog-Percussion-v2.7-BLE-MIDI-PLL.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: 3rdi-Analog-Percussion-v2.6-BLE-MIDI-Sync-Fix-APK
-          path: 3rdi-Analog-Percussion-v2.6-BLE-MIDI-Sync-Fix.apk
+          name: 3rdi-Analog-Percussion-v2.7-BLE-MIDI-PLL-APK
+          path: 3rdi-Analog-Percussion-v2.7-BLE-MIDI-PLL.apk
           if-no-files-found: error
           retention-days: 30
