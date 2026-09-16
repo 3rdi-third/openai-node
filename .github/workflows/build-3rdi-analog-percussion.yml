@@ -36,7 +36,7 @@ jobs:
           yes | "$SDKMANAGER" --licenses >/dev/null || true
           "$SDKMANAGER" 'platform-tools' 'platforms;android-35' 'build-tools;35.0.0'
 
-      - name: Apply v1.3 UI patch
+      - name: Apply fullscreen/theme integration patch
         run: python3 android-dfam/apply_v13.py
 
       - name: Set up Gradle
@@ -49,12 +49,12 @@ jobs:
         run: gradle --no-daemon :app:assembleDebug
 
       - name: Rename APK
-        run: cp android-dfam/app/build/outputs/apk/debug/app-debug.apk 3rdi-Analog-Percussion-v1.3.apk
+        run: cp android-dfam/app/build/outputs/apk/debug/app-debug.apk 3rdi-Analog-Percussion-v1.4.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: 3rdi-Analog-Percussion-v1.3-APK
-          path: 3rdi-Analog-Percussion-v1.3.apk
+          name: 3rdi-Analog-Percussion-v1.4-APK
+          path: 3rdi-Analog-Percussion-v1.4.apk
           if-no-files-found: error
           retention-days: 30
