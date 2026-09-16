@@ -39,10 +39,12 @@ jobs:
           APK="android-session-grid/app/build/outputs/apk/release/app-release.apk"
           test -s "$APK"
           unzip -t "$APK" >/dev/null
-          unzip -l "$APK" | grep -q 'res/raw/startup_intro.mp4'
+          unzip -Z1 "$APK" > /tmp/session-grid-apk-files.txt
+          grep -Fxq 'res/raw/startup_intro.mp4' /tmp/session-grid-apk-files.txt
           sha256sum "$APK"
 
-          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -1)"
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner -print | sort -V | tail -1)"
+          test -n "$APKSIGNER"
           test -x "$APKSIGNER"
           "$APKSIGNER" verify --verbose --print-certs "$APK"
 
