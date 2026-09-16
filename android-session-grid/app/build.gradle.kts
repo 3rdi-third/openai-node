@@ -13,8 +13,24 @@ android {
         applicationId = "com.threerdi.sessiongrid"
         minSdk = 26
         targetSdk = 35
-        versionCode = 6
-        versionName = "1.4.1"
+        versionCode = 7
+        versionName = "1.5.0"
+    }
+
+    buildTypes {
+        getByName("release") {
+            isDebuggable = false
+            isMinifyEnabled = false
+            isShrinkResources = false
+            // Installable release candidate without publishing a private production key.
+            // Replace this with a private release signing config before store distribution.
+            signingConfig = signingConfigs.getByName("debug")
+        }
+    }
+
+    lint {
+        abortOnError = true
+        checkReleaseBuilds = true
     }
 
     compileOptions {
