@@ -5,6 +5,8 @@ import android.content.Intent
 import android.graphics.Color
 import android.net.Uri
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.view.MotionEvent
 import android.view.ViewGroup
 import android.view.WindowInsets
@@ -15,6 +17,8 @@ import android.widget.VideoView
 class StartupActivity : Activity() {
     private var finished = false
     private lateinit var videoView: VideoView
+    private val handler = Handler(Looper.getMainLooper())
+    private val failSafe = Runnable { finishIntro() }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -46,7 +50,7 @@ class StartupActivity : Activity() {
                 finishIntro()
             }
             setOnErrorListener { _, _, _ ->
-                // Never trap the user on the splash screen if a device codec refuses playback.
+                // A codec failure must never prevent the main app from opening.
                 finishIntro()
                 true
             }
@@ -61,14 +65,17 @@ class StartupActivity : Activity() {
         root.addView(videoView)
         setContentView(root)
 
+        // Guarantees entry to the main app even on devices with a broken/stalled codec callback.
+        handler.postDelayed(failSafe, 6500L)
+
         val videoUri = Uri.parse("android.resource://$packageName/${R.raw.startup_intro}")
         videoView.setVideoURI(videoUri)
-        videoView.start()
     }
 
     private fun finishIntro() {
-        if (finished) return
+        if (finished || isFinishing || isDestroyed) return
         finished = true
+        handler.removeCallbacks(failSafe)
         try {
             videoView.stopPlayback()
         } catch (_: Throwable) {
@@ -79,9 +86,13 @@ class StartupActivity : Activity() {
     }
 
     override fun onDestroy() {
-        try {
-            videoView.stopPlayback()
-        } catch (_: Throwable) {
+        finished = true
+        handler.removeCallbacks(failSafe)
+        if (::videoView.isInitialized) {
+            try {
+                videoView.stopPlayback()
+            } catch (_: Throwable) {
+            }
         }
         super.onDestroy()
     }
