@@ -1,0 +1,46 @@
+name: Build Session Grid APK
+on:
+  workflow_dispatch:
+  push:
+    branches: [session-grid-android]
+    paths: ['android-session-grid/**', '.github/workflows/build-session-grid-apk.yml']
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Generate embedded startup video
+        shell: bash
+        run: |
+          if ! command -v ffmpeg >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y ffmpeg
+          fi
+          mkdir -p android-session-grid/app/src/main/res/raw
+          ffmpeg -y -hide_banner -loglevel error \
+            -f lavfi -i "color=c=0x060607:s=1280x720:r=30:d=4" \
+            -f lavfi -i "sine=frequency=55:duration=0.22:sample_rate=48000" \
+            -f lavfi -i "sine=frequency=55:duration=0.22:sample_rate=48000" \
+            -f lavfi -i "sine=frequency=55:duration=0.22:sample_rate=48000" \
+            -f lavfi -i "sine=frequency=55:duration=0.22:sample_rate=48000" \
+            -f lavfi -i "sine=frequency=900:duration=4:sample_rate=48000" \
+            -f lavfi -i "sine=frequency=58:duration=4:sample_rate=48000" \
+            -filter_complex "[0:v]drawgrid=w=1280:h=18:t=2:c=0x18181a@0.55,drawtext=fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf:text='3rdi SESSION GRID':fontcolor=white:fontsize=92:x=(w-text_w)/2:y=h*0.36,drawtext=fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf:text='INDUSTRIAL SESSION ENGINE':fontcolor=0xff5c00:fontsize=28:x=(w-text_w)/2:y=h*0.52:enable='gte(t,1)',drawbox=x=128:y=454:w=1024:h=6:color=0xff5c00:t=fill[v];[1:a]volume=3.5,adelay=0|0[k0];[2:a]volume=3.5,adelay=1000|1000[k1];[3:a]volume=3.5,adelay=2000|2000[k2];[4:a]volume=3.5,adelay=3000|3000[k3];[5:a]volume=0.22,tremolo=f=7:d=0.75[s];[6:a]volume=0.45,tremolo=f=8:d=0.55[b];[k0][k1][k2][k3][s][b]amix=inputs=6:normalize=0,acompressor=threshold=0.2:ratio=5:attack=5:release=80,alimiter=limit=0.9[a]" \
+            -map "[v]" -map "[a]" \
+            -c:v libx264 -pix_fmt yuv420p -preset veryfast -crf 21 \
+            -c:a aac -b:a 160k -shortest -movflags +faststart \
+            android-session-grid/app/src/main/res/raw/startup_intro.mp4
+      - name: Build debug APK
+        working-directory: android-session-grid
+        run: gradle assembleDebug
+      - uses: actions/upload-artifact@v4
+        with:
+          name: 3rdi-session-grid-apk
+          path: android-session-grid/app/build/outputs/apk/debug/app-debug.apk

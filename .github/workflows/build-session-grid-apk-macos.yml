@@ -1,0 +1,41 @@
+name: Build Session Grid APK macOS
+
+on:
+  push:
+    branches: [session-grid-android]
+    paths:
+      - 'android-session-grid/**'
+      - '.github/workflows/build-session-grid-apk-macos.yml'
+  workflow_dispatch:
+
+jobs:
+  build-apk-macos:
+    runs-on: macos-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Verify Android SDK
+        run: |
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
+          ls "$ANDROID_HOME/platforms" | tail -5 || true
+      - name: Build APK
+        working-directory: android-session-grid
+        run: gradle --no-daemon clean assembleDebug
+      - name: Verify APK
+        run: |
+          ls -lh android-session-grid/app/build/outputs/apk/debug/app-debug.apk
+          shasum -a 256 android-session-grid/app/build/outputs/apk/debug/app-debug.apk
+          unzip -t android-session-grid/app/build/outputs/apk/debug/app-debug.apk >/dev/null
+      - uses: actions/upload-artifact@v4
+        with:
+          name: 3rdi-session-grid-v1.4-macos-apk
+          path: android-session-grid/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
