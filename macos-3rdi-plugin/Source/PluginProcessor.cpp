@@ -24,6 +24,7 @@ void ThreeRDIAnalogPercussionAudioProcessor::prepareToPlay (double sampleRate, i
     envAmp = envFilter = 0.0f;
     z1 = z2 = z3 = z4 = 0.0f;
     step = 0;
+    currentStep.store (-1);
     lastHostStep = -1;
 }
 
@@ -71,6 +72,38 @@ void ThreeRDIAnalogPercussionAudioProcessor::triggerStep (int stepIndex, float n
     envFilter = 1.0f;
 }
 
+void ThreeRDIAnalogPercussionAudioProcessor::manualTrigger()
+{
+    manualTriggerRequested.store (true);
+}
+
+void ThreeRDIAnalogPercussionAudioProcessor::randomizeSequence()
+{
+    static const float scale[] = {-12.0f, -7.0f, -5.0f, 0.0f, 2.0f, 5.0f, 7.0f, 10.0f, 12.0f};
+
+    for (int i = 0; i < 8; ++i)
+    {
+        const auto pitchId = "stepPitch" + juce::String (i + 1);
+        const auto velId   = "stepVel" + juce::String (i + 1);
+
+        if (auto* pitchParam = apvts.getParameter (pitchId))
+        {
+            const float value = scale[rng.nextInt ((int) std::size (scale))];
+            pitchParam->beginChangeGesture();
+            pitchParam->setValueNotifyingHost (pitchParam->convertTo0to1 (value));
+            pitchParam->endChangeGesture();
+        }
+
+        if (auto* velParam = apvts.getParameter (velId))
+        {
+            const float value = 0.35f + rng.nextFloat() * 0.65f;
+            velParam->beginChangeGesture();
+            velParam->setValueNotifyingHost (velParam->convertTo0to1 (value));
+            velParam->endChangeGesture();
+        }
+    }
+}
+
 void ThreeRDIAnalogPercussionAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                                                             juce::MidiBuffer& midi)
 {
@@ -87,6 +120,9 @@ void ThreeRDIAnalogPercussionAudioProcessor::processBlock (juce::AudioBuffer<flo
         }
     }
 
+    if (manualTriggerRequested.exchange (false))
+        triggerStep (currentStep.load() >= 0 ? currentStep.load() : 0);
+
     const bool hostSync = pval (apvts, "hostSync") > 0.5f;
     bool hostPlaying = false;
     double ppq = 0.0;
@@ -94,7 +130,8 @@ void ThreeRDIAnalogPercussionAudioProcessor::processBlock (juce::AudioBuffer<flo
 
     const float ampDecay = envCoeff (pval (apvts, "vcaDecay"));
     const float filtDecay = envCoeff (pval (apvts, "vcfDecay"));
-    const bool shouldRun = !hostSync || hostPlaying;
+    const bool internalRun = pval (apvts, "run") > 0.5f;
+    const bool shouldRun = hostSync ? hostPlaying : internalRun;
 
     if (hostSync && hostPlaying)
     {
@@ -103,6 +140,7 @@ void ThreeRDIAnalogPercussionAudioProcessor::processBlock (juce::AudioBuffer<flo
         {
             lastHostStep = hostStep;
             step = hostStep;
+            currentStep.store (step);
             triggerStep (step);
         }
     }
@@ -113,6 +151,7 @@ void ThreeRDIAnalogPercussionAudioProcessor::processBlock (juce::AudioBuffer<flo
         {
             if (samplesToNextStep <= 0.0)
             {
+                currentStep.store (step);
                 triggerStep (step);
                 step = (step + 1) & 7;
                 samplesToNextStep += sr * 60.0 / bpm / 2.0;
@@ -197,6 +236,7 @@ ThreeRDIAnalogPercussionAudioProcessor::createParameterLayout()
     f ("pitchEnv", "Pitch Env", -24, 24, 0);
     f ("tempo", "Internal Tempo", 40, 300, 133, 133);
     p.push_back (std::make_unique<juce::AudioParameterBool> (juce::ParameterID{"hostSync", 1}, "Ableton Host Sync", true));
+    p.push_back (std::make_unique<juce::AudioParameterBool> (juce::ParameterID{"run", 1}, "Run Sequencer", true));
 
     const float pitchDefaults[8] = {0,0,7,-5,0,12,-2,5};
     const float velDefaults[8] = {1.0f,0.58f,0.82f,0.52f,0.96f,0.72f,0.45f,0.88f};
