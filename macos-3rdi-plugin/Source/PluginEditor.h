@@ -92,6 +92,7 @@ private:
     juce::TextButton runButton { "STOP" };
     juce::TextButton trigButton { "TRIG" };
     juce::TextButton randButton { "RAND" };
+    std::array<std::unique_ptr<juce::TextButton>, 8> stepPads;
 
     std::unique_ptr<ButtonAttachment> hostSyncAttachment;
     std::unique_ptr<ButtonAttachment> runAttachment;
