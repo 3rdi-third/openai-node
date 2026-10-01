@@ -32,8 +32,9 @@ jobs:
           cd ios-3rdi-analog
           xcodebuild             -project AnalogPercussion.xcodeproj             -scheme AnalogPercussion             -configuration Release             -sdk iphoneos             -destination 'generic/platform=iOS'             -derivedDataPath build-device             CODE_SIGNING_ALLOWED=NO             build
 
-      - name: Package artifacts
+      - name: Package unsigned and ad-hoc signed IPA
         run: |
+          set -euo pipefail
           cd ios-3rdi-analog
 
           SIM_APP=$(find build-sim -type d -name '*.app' | head -1)
@@ -44,27 +45,50 @@ jobs:
 
           ditto -c -k --sequesterRsrc --keepParent             "$SIM_APP"             3rdi-Analog-Percussion-iOS-Simulator.zip
 
+          # Keep the original unsigned IPA.
+          rm -rf Payload
           mkdir -p Payload
           cp -R "$DEV_APP" Payload/
-
           zip -qry             3rdi-Analog-Percussion-iOS-unsigned.ipa             Payload
 
-          rm -rf Payload
+          # Alternative ad-hoc signature. This is a real Mach-O code signature,
+          # but it intentionally has no Apple provisioning profile.
+          rm -rf AdHocPayload
+          mkdir -p AdHocPayload
+          cp -R "$DEV_APP" AdHocPayload/
+
+          ADHOC_APP=$(find AdHocPayload -type d -name '*.app' | head -1)
+          codesign             --force             --deep             --sign -             --timestamp=none             "$ADHOC_APP"
+
+          codesign --verify --deep --strict --verbose=2 "$ADHOC_APP"
+          codesign -dv --verbose=4 "$ADHOC_APP" 2>&1 | tee adhoc-codesign-info.txt
+
+          mv AdHocPayload Payload-AdHoc
+          zip -qry             3rdi-Analog-Percussion-iOS-AdHoc-Signed.ipa             Payload-AdHoc
+
+          rm -rf Payload Payload-AdHoc
 
           zip -qry             3rdi-Analog-Percussion-iOS-Xcode-Source.zip             project.yml             Sources             README.md             AnalogPercussion.xcodeproj
 
       - name: Verify artifacts
         run: |
+          set -euo pipefail
           cd ios-3rdi-analog
+
           test -s 3rdi-Analog-Percussion-iOS-Simulator.zip
           test -s 3rdi-Analog-Percussion-iOS-unsigned.ipa
+          test -s 3rdi-Analog-Percussion-iOS-AdHoc-Signed.ipa
           test -s 3rdi-Analog-Percussion-iOS-Xcode-Source.zip
-          echo "iOS artifacts verified"
+          grep -q "Signature=adhoc" adhoc-codesign-info.txt
+
+          echo "iOS artifacts verified, including ad-hoc code signature"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: 3rdi-Analog-Percussion-iOS
+          name: 3rdi-Analog-Percussion-iOS-Signing-Alternatives
           path: |
             ios-3rdi-analog/3rdi-Analog-Percussion-iOS-Simulator.zip
             ios-3rdi-analog/3rdi-Analog-Percussion-iOS-unsigned.ipa
+            ios-3rdi-analog/3rdi-Analog-Percussion-iOS-AdHoc-Signed.ipa
             ios-3rdi-analog/3rdi-Analog-Percussion-iOS-Xcode-Source.zip
+            ios-3rdi-analog/adhoc-codesign-info.txt
