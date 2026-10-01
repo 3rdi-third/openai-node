@@ -1,0 +1,70 @@
+name: Build 3rdi Analog Percussion iOS
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'ios-3rdi-analog/**'
+      - '.github/workflows/build-ios-analog-percussion.yml'
+
+jobs:
+  build:
+    runs-on: macos-15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: |
+          cd ios-3rdi-analog
+          xcodegen generate
+
+      - name: Build iPhone Simulator app
+        run: |
+          cd ios-3rdi-analog
+          xcodebuild             -project AnalogPercussion.xcodeproj             -scheme AnalogPercussion             -configuration Release             -sdk iphonesimulator             -derivedDataPath build-sim             CODE_SIGNING_ALLOWED=NO             build
+
+      - name: Build unsigned iPhone device app
+        run: |
+          cd ios-3rdi-analog
+          xcodebuild             -project AnalogPercussion.xcodeproj             -scheme AnalogPercussion             -configuration Release             -sdk iphoneos             -destination 'generic/platform=iOS'             -derivedDataPath build-device             CODE_SIGNING_ALLOWED=NO             build
+
+      - name: Package artifacts
+        run: |
+          cd ios-3rdi-analog
+
+          SIM_APP=$(find build-sim -type d -name '*.app' | head -1)
+          DEV_APP=$(find build-device -type d -name '*.app' | head -1)
+
+          test -n "$SIM_APP"
+          test -n "$DEV_APP"
+
+          ditto -c -k --sequesterRsrc --keepParent             "$SIM_APP"             3rdi-Analog-Percussion-iOS-Simulator.zip
+
+          mkdir -p Payload
+          cp -R "$DEV_APP" Payload/
+
+          zip -qry             3rdi-Analog-Percussion-iOS-unsigned.ipa             Payload
+
+          rm -rf Payload
+
+          zip -qry             3rdi-Analog-Percussion-iOS-Xcode-Source.zip             project.yml             Sources             README.md             AnalogPercussion.xcodeproj
+
+      - name: Verify artifacts
+        run: |
+          cd ios-3rdi-analog
+          test -s 3rdi-Analog-Percussion-iOS-Simulator.zip
+          test -s 3rdi-Analog-Percussion-iOS-unsigned.ipa
+          test -s 3rdi-Analog-Percussion-iOS-Xcode-Source.zip
+          echo "iOS artifacts verified"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: 3rdi-Analog-Percussion-iOS
+          path: |
+            ios-3rdi-analog/3rdi-Analog-Percussion-iOS-Simulator.zip
+            ios-3rdi-analog/3rdi-Analog-Percussion-iOS-unsigned.ipa
+            ios-3rdi-analog/3rdi-Analog-Percussion-iOS-Xcode-Source.zip
