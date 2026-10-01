@@ -60,61 +60,85 @@ jobs:
           file "$AU_BIN" | grep -q 'x86_64'
 
       - name: Ad-hoc sign plugins
-        shell: bash
         run: |
-          set -euo pipefail
           codesign --force --deep --sign - "${{ steps.locate.outputs.vst3 }}"
           codesign --force --deep --sign - "${{ steps.locate.outputs.au }}"
           codesign --verify --deep --strict "${{ steps.locate.outputs.vst3 }}"
           codesign --verify --deep --strict "${{ steps.locate.outputs.au }}"
 
-      - name: Build installer package and DMG
+      - name: Validate AU with auval
         shell: bash
         run: |
           set -euo pipefail
-          ROOT="$RUNNER_TEMP/3rdi-root"
+          mkdir -p "$HOME/Library/Audio/Plug-Ins/Components"
+          rm -rf "$HOME/Library/Audio/Plug-Ins/Components/3RDI Analog Percussion.component"
+          ditto "${{ steps.locate.outputs.au }}" "$HOME/Library/Audio/Plug-Ins/Components/3RDI Analog Percussion.component"
+          xattr -dr com.apple.quarantine "$HOME/Library/Audio/Plug-Ins/Components/3RDI Analog Percussion.component" || true
+          killall -9 AudioComponentRegistrar 2>/dev/null || true
+          sleep 3
+          /usr/bin/auval -a | grep -i "3RDI" || true
+          /usr/bin/auval -v aumu R3ap Trdi
+
+      - name: Build compatibility DMG
+        shell: bash
+        run: |
+          set -euo pipefail
           DMGROOT="$RUNNER_TEMP/3rdi-dmg"
-          mkdir -p "$ROOT/Library/Audio/Plug-Ins/VST3"
-          mkdir -p "$ROOT/Library/Audio/Plug-Ins/Components"
-          mkdir -p "$DMGROOT"
+          mkdir -p "$DMGROOT/Plugins"
 
-          ditto "${{ steps.locate.outputs.vst3 }}" "$ROOT/Library/Audio/Plug-Ins/VST3/3RDI Analog Percussion.vst3"
-          ditto "${{ steps.locate.outputs.au }}" "$ROOT/Library/Audio/Plug-Ins/Components/3RDI Analog Percussion.component"
+          ditto "${{ steps.locate.outputs.vst3 }}" "$DMGROOT/Plugins/3RDI Analog Percussion.vst3"
+          ditto "${{ steps.locate.outputs.au }}" "$DMGROOT/Plugins/3RDI Analog Percussion.component"
 
-          pkgbuild \
-            --root "$ROOT" \
-            --identifier "com.threerdi.analogpercussion.pkg" \
-            --version "1.0.0" \
-            --install-location "/" \
-            "$DMGROOT/Install 3RDI Analog Percussion.pkg"
+          cat > "$DMGROOT/Install.command" <<'SCRIPT'
+          #!/bin/bash
+          set -e
+          HERE="$(cd "$(dirname "$0")" && pwd)"
+          VST3_DST="$HOME/Library/Audio/Plug-Ins/VST3"
+          AU_DST="$HOME/Library/Audio/Plug-Ins/Components"
+
+          mkdir -p "$VST3_DST" "$AU_DST"
+          rm -rf "$VST3_DST/3RDI Analog Percussion.vst3"
+          rm -rf "$AU_DST/3RDI Analog Percussion.component"
+
+          ditto "$HERE/Plugins/3RDI Analog Percussion.vst3" "$VST3_DST/3RDI Analog Percussion.vst3"
+          ditto "$HERE/Plugins/3RDI Analog Percussion.component" "$AU_DST/3RDI Analog Percussion.component"
+
+          xattr -dr com.apple.quarantine "$VST3_DST/3RDI Analog Percussion.vst3" 2>/dev/null || true
+          xattr -dr com.apple.quarantine "$AU_DST/3RDI Analog Percussion.component" 2>/dev/null || true
+
+          codesign --force --deep --sign - "$VST3_DST/3RDI Analog Percussion.vst3" 2>/dev/null || true
+          codesign --force --deep --sign - "$AU_DST/3RDI Analog Percussion.component" 2>/dev/null || true
+
+          killall -9 AudioComponentRegistrar 2>/dev/null || true
+
+          echo
+          echo "3RDI Analog Percussion installed successfully."
+          echo "VST3: $VST3_DST"
+          echo "AU:   $AU_DST"
+          echo
+          echo "Restart Ableton Live, then rescan Plug-Ins."
+          read -n 1 -s -r -p "Press any key to close..."
+          SCRIPT
+          chmod +x "$DMGROOT/Install.command"
 
           cp macos-3rdi-plugin/README.md "$DMGROOT/README.txt"
 
           hdiutil create \
-            -volname "3RDI Analog Percussion Installer" \
+            -volname "3RDI Analog Percussion Intel" \
             -srcfolder "$DMGROOT" \
             -ov \
             -format UDZO \
-            "$GITHUB_WORKSPACE/3RDI-Analog-Percussion-macOS-Intel-VST3-AU.dmg"
+            "$GITHUB_WORKSPACE/3RDI-Analog-Percussion-macOS-Intel-Fixed.dmg"
 
       - name: Verify DMG
         run: |
           set -euxo pipefail
-          test -s 3RDI-Analog-Percussion-macOS-Intel-VST3-AU.dmg
-          shasum -a 256 3RDI-Analog-Percussion-macOS-Intel-VST3-AU.dmg
+          test -s 3RDI-Analog-Percussion-macOS-Intel-Fixed.dmg
+          shasum -a 256 3RDI-Analog-Percussion-macOS-Intel-Fixed.dmg
 
-      - name: Upload DMG
+      - name: Upload fixed DMG
         uses: actions/upload-artifact@v4
         with:
-          name: 3RDI-Analog-Percussion-macOS-Intel-VST3-AU-DMG
-          path: 3RDI-Analog-Percussion-macOS-Intel-VST3-AU.dmg
-          if-no-files-found: error
-
-      - name: Upload raw plugin bundles
-        uses: actions/upload-artifact@v4
-        with:
-          name: 3RDI-Analog-Percussion-macOS-Intel-Plugins
-          path: |
-            ${{ steps.locate.outputs.vst3 }}
-            ${{ steps.locate.outputs.au }}
+          name: 3RDI-Analog-Percussion-macOS-Intel-Fixed-DMG
+          path: 3RDI-Analog-Percussion-macOS-Intel-Fixed.dmg
           if-no-files-found: error
