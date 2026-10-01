@@ -126,7 +126,7 @@ ThreeRDIAnalogPercussionAudioProcessorEditor::ThreeRDIAnalogPercussionAudioProce
     setLookAndFeel (&look);
     setOpaque (true);
     setResizable (false, false);
-    setSize (1200, 720);
+    setSize (1200, 850);
 
     if (! processor.apvts.state.hasProperty (panelColourProperty))
         processor.apvts.state.setProperty (panelColourProperty, (int64) defaultPanel.getARGB(), nullptr);
@@ -165,6 +165,23 @@ ThreeRDIAnalogPercussionAudioProcessorEditor::ThreeRDIAnalogPercussionAudioProce
     addKnob ("lfoFm",     "LFO>FM",    {mod[3]-32, 574, 64, 74}, "", 2, true);
     addKnob ("filterEnv", "VCF ENV",   {mod[4]-32, 574, 64, 74}, "x", 1, true);
     addKnob ("pitchEnv",  "PITCH ENV", {mod[5]-32, 574, 64, 74}, " st", 1, true);
+
+    auto deepX = std::array<int, 14> { 72, 152, 232, 312, 392, 472, 552,
+                                       632, 712, 792, 872, 952, 1032, 1112 };
+    addKnob ("shape1",      "SHAPE 1",   {deepX[0]-27, 752, 54, 68}, "", 2, true);
+    addKnob ("shape2",      "SHAPE 2",   {deepX[1]-27, 752, 54, 68}, "", 2, true);
+    addKnob ("subLevel",    "SUB",       {deepX[2]-27, 752, 54, 68}, "", 2, true);
+    addKnob ("ringMod",     "RING",      {deepX[3]-27, 752, 54, 68}, "", 2, true);
+    addKnob ("crossMod",    "X-MOD",     {deepX[4]-27, 752, 54, 68}, "", 2, true);
+    addKnob ("wavefold",    "FOLD",      {deepX[5]-27, 752, 54, 68}, "", 2, true);
+    addKnob ("bodyLevel",   "BODY",      {deepX[6]-27, 752, 54, 68}, "", 2, true);
+    addKnob ("bodyTune",    "BODY TUNE", {deepX[7]-27, 752, 54, 68}, " st", 0, true);
+    addKnob ("bodyDecay",   "BODY DEC",  {deepX[8]-27, 752, 54, 68}, " ms", 0, true);
+    addKnob ("filterMorph", "FLT MORPH", {deepX[9]-27, 752, 54, 68}, "", 2, true);
+    addKnob ("filterDrive", "FLT DRIVE", {deepX[10]-27,752, 54, 68}, "", 2, true);
+    addKnob ("drift",       "DRIFT",     {deepX[11]-27,752, 54, 68}, "", 2, true);
+    addKnob ("warmth",      "WARMTH",    {deepX[12]-27,752, 54, 68}, "", 2, true);
+    addKnob ("stereoWidth", "WIDTH",     {deepX[13]-27,752, 54, 68}, "", 2, true);
 
     tempoSlider.setName ("TEMPO");
     tempoSlider.setSliderStyle (juce::Slider::LinearBar);
@@ -263,9 +280,9 @@ void ThreeRDIAnalogPercussionAudioProcessorEditor::paint (juce::Graphics& g)
     g.fillAll (look.panelColour.darker (0.18f));
 
     g.setColour (look.panelColour);
-    g.fillRoundedRectangle ({14.0f, 14.0f, 1172.0f, 692.0f}, 22.0f);
+    g.fillRoundedRectangle ({14.0f, 14.0f, 1172.0f, 822.0f}, 22.0f);
     g.setColour (look.panelColour.brighter (0.08f));
-    g.fillRoundedRectangle ({28.0f, 28.0f, 1144.0f, 664.0f}, 17.0f);
+    g.fillRoundedRectangle ({28.0f, 28.0f, 1144.0f, 794.0f}, 17.0f);
 
     g.setColour (look.textColour);
     g.setFont (juce::FontOptions (31.0f, juce::Font::bold));
@@ -308,9 +325,20 @@ void ThreeRDIAnalogPercussionAudioProcessorEditor::paint (juce::Graphics& g)
     g.setFont (juce::FontOptions (11.5f, juce::Font::bold));
     g.drawText ("DRIVE", 68, 572, 100, 18, juce::Justification::centredLeft);
 
+    g.setColour (look.textColour.withAlpha (0.25f));
+    g.fillRect (62, 704, 1076, 2);
+
+    g.setColour (look.textColour);
+    g.setFont (juce::FontOptions (11.5f, juce::Font::bold));
+    g.drawText ("DEEP / STRUCTURE",
+                68, 714, 260, 18, juce::Justification::centredLeft);
+    g.setFont (juce::FontOptions (8.8f));
+    g.drawText ("OSC SHAPING • SUB • RING/X-MOD • WAVEFOLD • BODY • DUAL FILTER • DRIFT • WARMTH • STEREO",
+                250, 714, 890, 18, juce::Justification::centredRight);
+
     g.setFont (juce::FontOptions (9.0f));
-    g.drawText ("3RDI AUDIO LABS • INTEL macOS VST3 / AU",
-                880, 682, 292, 16, juce::Justification::centredRight);
+    g.drawText ("3RDI AUDIO LABS • INTEL macOS VST3 / AU • DEEP ENGINE",
+                820, 828, 352, 16, juce::Justification::centredRight);
 }
 
 
@@ -527,7 +555,7 @@ void ThreeRDIAnalogPercussionAudioProcessorEditor::resetToDefaults()
 
 void ThreeRDIAnalogPercussionAudioProcessorEditor::resized()
 {
-    // Fixed 1200 x 720 layout mirrors the Android synth panel.
+    // Fixed 1200 x 850 layout: Android-style panel plus DEEP / STRUCTURE engine row.
 }
 
 void ThreeRDIAnalogPercussionAudioProcessorEditor::timerCallback()
