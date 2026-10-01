@@ -43,11 +43,14 @@ private:
     float getHostTempoAndState (bool& hostPlaying, double& ppq);
 
     double sr = 48000.0;
-    double phase1 = 0.0, phase2 = 0.0, lfoPhase = 0.0;
+    double phase1 = 0.0, phase2 = 0.0, phaseSub = 0.0, phaseBody = 0.0;
+    double lfoPhase = 0.0, driftPhase1 = 0.0, driftPhase2 = 0.0;
     double samplesToNextStep = 0.0;
-    float envAmp = 0.0f, envFilter = 0.0f, velocity = 1.0f;
+    float envAmp = 0.0f, envFilter = 0.0f, bodyEnv = 0.0f, velocity = 1.0f;
     float baseHz = 62.0f;
     float z1 = 0, z2 = 0, z3 = 0, z4 = 0;
+    float svfLow = 0.0f, svfBand = 0.0f;
+    float warmL = 0.0f, warmR = 0.0f;
     int step = 0;
     std::atomic<int> currentStep {-1};
     std::atomic<bool> manualTriggerRequested {false};
