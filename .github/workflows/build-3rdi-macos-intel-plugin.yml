@@ -80,7 +80,8 @@ jobs:
           WORK="$RUNNER_TEMP/3rdi-app-installer"
           APP="$WORK/Install 3RDI Analog Percussion.app"
           RES="$APP/Contents/Resources"
-          mkdir -p "$RES/Plugins"
+          mkdir -p "$WORK"
+          rm -rf "$APP"
 
           cat > "$WORK/installer.applescript" <<'APPLESCRIPT'
           on run
