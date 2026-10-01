@@ -34,6 +34,7 @@ public:
     static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
 
     void manualTrigger();
+    void requestTriggerStep (int stepIndex);
     void randomizeSequence();
     int getCurrentStep() const noexcept { return currentStep.load(); }
 
@@ -54,6 +55,7 @@ private:
     int step = 0;
     std::atomic<int> currentStep {-1};
     std::atomic<bool> manualTriggerRequested {false};
+    std::atomic<int> requestedStep {-1};
     int lastHostStep = -1;
     juce::Random rng;
 
