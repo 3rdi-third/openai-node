@@ -182,7 +182,7 @@ final class AppModel: ObservableObject {
 
         value.name =
             name.isEmpty
-            ? "Preset (slot + 1)"
+            ? "Preset \(slot + 1)"
             : name
 
         presets[slot] = value
