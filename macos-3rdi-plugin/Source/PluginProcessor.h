@@ -33,6 +33,10 @@ public:
     juce::AudioProcessorValueTreeState apvts;
     static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
 
+    void manualTrigger();
+    void randomizeSequence();
+    int getCurrentStep() const noexcept { return currentStep.load(); }
+
 private:
     void triggerStep (int stepIndex, float noteHz = -1.0f);
     float envCoeff (float ms) const noexcept;
@@ -45,6 +49,8 @@ private:
     float baseHz = 62.0f;
     float z1 = 0, z2 = 0, z3 = 0, z4 = 0;
     int step = 0;
+    std::atomic<int> currentStep {-1};
+    std::atomic<bool> manualTriggerRequested {false};
     int lastHostStep = -1;
     juce::Random rng;
 
