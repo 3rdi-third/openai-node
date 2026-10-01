@@ -103,6 +103,11 @@ void ThreeRDIAnalogPercussionAudioProcessor::manualTrigger()
     manualTriggerRequested.store (true);
 }
 
+void ThreeRDIAnalogPercussionAudioProcessor::requestTriggerStep (int stepIndex)
+{
+    requestedStep.store (juce::jlimit (0, 7, stepIndex));
+}
+
 void ThreeRDIAnalogPercussionAudioProcessor::randomizeSequence()
 {
     static const float scale[] = {-12.0f, -7.0f, -5.0f, 0.0f, 2.0f, 5.0f, 7.0f, 10.0f, 12.0f};
@@ -144,6 +149,12 @@ void ThreeRDIAnalogPercussionAudioProcessor::processBlock (juce::AudioBuffer<flo
             auto hz = (float) juce::MidiMessage::getMidiNoteInHertz (m.getNoteNumber());
             triggerStep (step & 7, hz);
         }
+    }
+
+    if (auto requested = requestedStep.exchange (-1); requested >= 0)
+    {
+        currentStep.store (requested);
+        triggerStep (requested);
     }
 
     if (manualTriggerRequested.exchange (false))
