@@ -30,6 +30,8 @@ juce_add_plugin(ThreeRDIAnalogPercussion
   PRODUCT_NAME "3RDI Analog Percussion"
 )
 
+juce_generate_juce_header(ThreeRDIAnalogPercussion)
+
 target_sources(ThreeRDIAnalogPercussion PRIVATE
   Source/PluginProcessor.cpp
   Source/PluginProcessor.h
