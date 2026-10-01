@@ -47,7 +47,7 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             build
 
-      - name: Package unsigned, ad-hoc and self-signed research IPAs
+      - name: Package final IPAs
         run: |
           set -euo pipefail
           cd ios-3rdi-analog
@@ -62,7 +62,6 @@ jobs:
             "$SIM_APP" \
             3rdi-Analog-Percussion-iOS-Simulator.zip
 
-          # Unsigned control.
           rm -rf unsigned-root
           mkdir -p unsigned-root/Payload
           cp -R "$DEV_APP" unsigned-root/Payload/
@@ -71,7 +70,6 @@ jobs:
             zip -qry ../3rdi-Analog-Percussion-iOS-unsigned.ipa Payload
           )
 
-          # Correctly packaged ad-hoc signed control.
           rm -rf adhoc-root
           mkdir -p adhoc-root/Payload
           cp -R "$DEV_APP" adhoc-root/Payload/
@@ -89,117 +87,15 @@ jobs:
 
           (
             cd adhoc-root
-            zip -qry ../3rdi-Analog-Percussion-iOS-AdHoc-Signed-CorrectPayload.ipa Payload
+            zip -qry ../3rdi-Analog-Percussion-iOS-AdHoc-Signed-Final.ipa Payload
           )
 
-          # Self-signed certificate experiment.
-          cat > research-openssl.cnf <<'EOF'
-          [req]
-          distinguished_name = dn
-          x509_extensions = ext
-          prompt = no
-
-          [dn]
-          CN = 3rdi Research Signing
-          O = 3rdi Research
-          OU = iOS Signing Lab
-          C = BE
-
-          [ext]
-          keyUsage = critical,digitalSignature
-          extendedKeyUsage = codeSigning
-          basicConstraints = critical,CA:FALSE
-          subjectKeyIdentifier = hash
-          EOF
-
-          openssl req \
-            -x509 \
-            -newkey rsa:2048 \
-            -nodes \
-            -days 30 \
-            -config research-openssl.cnf \
-            -keyout research.key \
-            -out research.crt
-
-          openssl x509 \
-            -in research.crt \
-            -noout \
-            -subject \
-            -issuer \
-            -serial \
-            -fingerprint \
-            -sha256 \
-            | tee selfsigned-certificate-info.txt
-
-          openssl pkcs12 \
-            -export \
-            -legacy \
-            -out research.p12 \
-            -inkey research.key \
-            -in research.crt \
-            -passout pass:researchpass
-
-          KEYCHAIN="$RUNNER_TEMP/3rdi-research.keychain-db"
-          security create-keychain -p researchpass "$KEYCHAIN"
-          security unlock-keychain -p researchpass "$KEYCHAIN"
-          security import research.p12 \
-            -k "$KEYCHAIN" \
-            -P researchpass \
-            -T /usr/bin/codesign
-
-          security add-trusted-cert \
-            -d \
-            -r trustRoot \
-            -k "$KEYCHAIN" \
-            research.crt
-
-          security set-key-partition-list \
-            -S apple-tool:,apple:,codesign: \
-            -s \
-            -k researchpass \
-            "$KEYCHAIN"
-
-          security find-identity -v -p codesigning "$KEYCHAIN" \
-            | tee selfsigned-keychain-identities.txt
-
-          SELF_ID=$(security find-identity -v -p codesigning "$KEYCHAIN" \
-            | sed -nE 's/^[[:space:]]*[0-9]+\) ([0-9A-F]+) "3rdi Research Signing".*/\1/p' \
-            | head -1)
-
-          test -n "$SELF_ID"
-
-          rm -rf selfsigned-root
-          mkdir -p selfsigned-root/Payload
-          cp -R "$DEV_APP" selfsigned-root/Payload/
-          SELF_APP=$(find selfsigned-root/Payload -maxdepth 1 -type d -name '*.app' | head -1)
-
-          codesign \
-            --force \
-            --deep \
-            --sign "$SELF_ID" \
-            --keychain "$KEYCHAIN" \
-            --timestamp=none \
-            "$SELF_APP"
-
-          codesign --verify --deep --strict --verbose=2 "$SELF_APP"
-          codesign -dv --verbose=4 "$SELF_APP" 2>&1 \
-            | tee selfsigned-codesign-info.txt
-
-          (
-            cd selfsigned-root
-            zip -qry ../3rdi-Analog-Percussion-iOS-SelfSigned-Research.ipa Payload
-          )
-
-          # Make absence of Apple provisioning explicit evidence.
           {
-            echo "ADHOC_EMBEDDED_PROFILE=$(test -f "$ADHOC_APP/embedded.mobileprovision" && echo yes || echo no)"
-            echo "SELFSIGNED_EMBEDDED_PROFILE=$(test -f "$SELF_APP/embedded.mobileprovision" && echo yes || echo no)"
-            echo "ADHOC_BUNDLE=$(defaults read "$(pwd)/$ADHOC_APP/Info" CFBundleIdentifier 2>/dev/null || true)"
-            echo "SELFSIGNED_BUNDLE=$(defaults read "$(pwd)/$SELF_APP/Info" CFBundleIdentifier 2>/dev/null || true)"
-          } | tee research-signing-summary.txt
+            echo "EMBEDDED_PROFILE=$(test -f "$ADHOC_APP/embedded.mobileprovision" && echo yes || echo no)"
+            echo "BUNDLE_ID=$(defaults read "$(pwd)/$ADHOC_APP/Info" CFBundleIdentifier 2>/dev/null || true)"
+          } | tee final-signing-summary.txt
 
-          rm -rf unsigned-root adhoc-root selfsigned-root
-          rm -f research.key research.p12
+          rm -rf unsigned-root adhoc-root
 
           zip -qry \
             3rdi-Analog-Percussion-iOS-Xcode-Source.zip \
@@ -208,49 +104,38 @@ jobs:
             README.md \
             AnalogPercussion.xcodeproj
 
-      - name: Verify research signing artifacts
+      - name: Verify final artifacts
         run: |
           set -euo pipefail
           cd ios-3rdi-analog
 
           test -s 3rdi-Analog-Percussion-iOS-Simulator.zip
           test -s 3rdi-Analog-Percussion-iOS-unsigned.ipa
-          test -s 3rdi-Analog-Percussion-iOS-AdHoc-Signed-CorrectPayload.ipa
-          test -s 3rdi-Analog-Percussion-iOS-SelfSigned-Research.ipa
+          test -s 3rdi-Analog-Percussion-iOS-AdHoc-Signed-Final.ipa
           test -s 3rdi-Analog-Percussion-iOS-Xcode-Source.zip
 
-          unzip -l 3rdi-Analog-Percussion-iOS-AdHoc-Signed-CorrectPayload.ipa \
-            | grep -q 'Payload/.*\.app/'
-
-          unzip -l 3rdi-Analog-Percussion-iOS-SelfSigned-Research.ipa \
+          unzip -l 3rdi-Analog-Percussion-iOS-AdHoc-Signed-Final.ipa \
             | grep -q 'Payload/.*\.app/'
 
           grep -q "Signature=adhoc" adhoc-codesign-info.txt
-          grep -q "3rdi Research Signing" selfsigned-certificate-info.txt
-          grep -q "3rdi Research Signing" selfsigned-codesign-info.txt
-          grep -q "ADHOC_EMBEDDED_PROFILE=no" research-signing-summary.txt
-          grep -q "SELFSIGNED_EMBEDDED_PROFILE=no" research-signing-summary.txt
+          grep -q "BUNDLE_ID=com.threerdi.analogpercussion" final-signing-summary.txt
 
           shasum -a 256 \
             3rdi-Analog-Percussion-iOS-unsigned.ipa \
-            3rdi-Analog-Percussion-iOS-AdHoc-Signed-CorrectPayload.ipa \
-            3rdi-Analog-Percussion-iOS-SelfSigned-Research.ipa \
-            | tee research-artifact-sha256.txt
+            3rdi-Analog-Percussion-iOS-AdHoc-Signed-Final.ipa \
+            3rdi-Analog-Percussion-iOS-Xcode-Source.zip \
+            | tee final-artifact-sha256.txt
 
-          echo "All research signing controls verified"
+          echo "Final iOS build verified"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: 3rdi-Analog-Percussion-iOS-Signing-Research
+          name: 3rdi-Analog-Percussion-iOS-Final
           path: |
             ios-3rdi-analog/3rdi-Analog-Percussion-iOS-Simulator.zip
             ios-3rdi-analog/3rdi-Analog-Percussion-iOS-unsigned.ipa
-            ios-3rdi-analog/3rdi-Analog-Percussion-iOS-AdHoc-Signed-CorrectPayload.ipa
-            ios-3rdi-analog/3rdi-Analog-Percussion-iOS-SelfSigned-Research.ipa
+            ios-3rdi-analog/3rdi-Analog-Percussion-iOS-AdHoc-Signed-Final.ipa
             ios-3rdi-analog/3rdi-Analog-Percussion-iOS-Xcode-Source.zip
             ios-3rdi-analog/adhoc-codesign-info.txt
-            ios-3rdi-analog/selfsigned-certificate-info.txt
-            ios-3rdi-analog/selfsigned-keychain-identities.txt
-            ios-3rdi-analog/selfsigned-codesign-info.txt
-            ios-3rdi-analog/research-signing-summary.txt
-            ios-3rdi-analog/research-artifact-sha256.txt
+            ios-3rdi-analog/final-signing-summary.txt
+            ios-3rdi-analog/final-artifact-sha256.txt
