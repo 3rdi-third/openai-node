@@ -8,6 +8,28 @@ float pval (juce::AudioProcessorValueTreeState& s, const char* id)
 {
     return s.getRawParameterValue (id)->load();
 }
+
+float morphWave (double phase, float shape)
+{
+    const float p = (float) phase;
+    const float sine = std::sin ((float) (phase * juce::MathConstants<double>::twoPi));
+    const float triangle = 1.0f - 4.0f * std::abs (p - 0.5f);
+    const float saw = p * 2.0f - 1.0f;
+
+    shape = juce::jlimit (0.0f, 1.0f, shape);
+    if (shape < 0.5f)
+        return juce::jmap (shape * 2.0f, sine, triangle);
+
+    return juce::jmap ((shape - 0.5f) * 2.0f, triangle, saw);
+}
+
+float foldSample (float x)
+{
+    float y = std::fmod (x + 1.0f, 4.0f);
+    if (y < 0.0f)
+        y += 4.0f;
+    return y < 2.0f ? y - 1.0f : 3.0f - y;
+}
 }
 
 ThreeRDIAnalogPercussionAudioProcessor::ThreeRDIAnalogPercussionAudioProcessor()
@@ -19,10 +41,13 @@ ThreeRDIAnalogPercussionAudioProcessor::ThreeRDIAnalogPercussionAudioProcessor()
 void ThreeRDIAnalogPercussionAudioProcessor::prepareToPlay (double sampleRate, int)
 {
     sr = sampleRate;
-    phase1 = phase2 = lfoPhase = 0.0;
+    phase1 = phase2 = phaseSub = phaseBody = 0.0;
+    lfoPhase = driftPhase1 = driftPhase2 = 0.0;
     samplesToNextStep = 0.0;
-    envAmp = envFilter = 0.0f;
+    envAmp = envFilter = bodyEnv = 0.0f;
     z1 = z2 = z3 = z4 = 0.0f;
+    svfLow = svfBand = 0.0f;
+    warmL = warmR = 0.0f;
     step = 0;
     currentStep.store (-1);
     lastHostStep = -1;
@@ -70,6 +95,7 @@ void ThreeRDIAnalogPercussionAudioProcessor::triggerStep (int stepIndex, float n
     velocity = pval (apvts, velId.toRawUTF8());
     envAmp = 1.0f;
     envFilter = 1.0f;
+    bodyEnv = 1.0f;
 }
 
 void ThreeRDIAnalogPercussionAudioProcessor::manualTrigger()
@@ -169,42 +195,143 @@ void ThreeRDIAnalogPercussionAudioProcessor::processBlock (juce::AudioBuffer<flo
         {
             float pitchMod = lfo * pval (apvts, "lfoPitch")
                            + envFilter * pval (apvts, "pitchEnv");
-            float f1 = baseHz * std::pow (2.0f, pitchMod / 12.0f);
-            float f2 = f1 * std::pow (2.0f, pval (apvts, "detune") / 12.0f);
+
+            const float driftAmount = pval (apvts, "drift");
+            driftPhase1 += 0.113 / sr;
+            driftPhase2 += 0.071 / sr;
+            driftPhase1 -= std::floor (driftPhase1);
+            driftPhase2 -= std::floor (driftPhase2);
+
+            const float driftCents1 = std::sin ((float) (driftPhase1 * juce::MathConstants<double>::twoPi))
+                                    * driftAmount * 9.0f;
+            const float driftCents2 = std::sin ((float) (driftPhase2 * juce::MathConstants<double>::twoPi))
+                                    * driftAmount * 11.0f;
+
+            float f1 = baseHz * std::pow (2.0f, (pitchMod + driftCents1 * 0.01f) / 12.0f);
+            float f2 = baseHz * std::pow (2.0f, (pitchMod
+                                             + pval (apvts, "detune")
+                                             + driftCents2 * 0.01f) / 12.0f);
+
+            const float shape1 = pval (apvts, "shape1");
+            const float shape2 = pval (apvts, "shape2");
+            const float crossMod = pval (apvts, "crossMod");
+
+            float osc1Pre = morphWave (phase1, shape1);
+            float osc2Pre = morphWave (phase2, shape2);
 
             float fmDepth = pval (apvts, "fm")
                           * (1.0f + lfo * pval (apvts, "lfoFm"));
-            float osc2 = std::sin ((float) (phase2 * juce::MathConstants<double>::twoPi));
-            phase1 += (f1 * (1.0 + fmDepth * osc2 * 0.35f)) / sr;
-            phase2 += f2 / sr;
+
+            phase1 += (f1 * (1.0 + fmDepth * osc2Pre * 0.34f)) / sr;
+            phase2 += (f2 * (1.0 + crossMod * osc1Pre * 0.20f)) / sr;
             phase1 -= std::floor (phase1);
             phase2 -= std::floor (phase2);
 
-            float osc1 = std::sin ((float) (phase1 * juce::MathConstants<double>::twoPi));
+            float osc1 = morphWave (phase1, shape1);
+            float osc2 = morphWave (phase2, shape2);
+
+            const float subLevel = pval (apvts, "subLevel");
+            const float subFrequency = juce::jmax (10.0f, f1 * 0.5f);
+            phaseSub += subFrequency / sr;
+            phaseSub -= std::floor (phaseSub);
+            float sub = std::sin ((float) (phaseSub * juce::MathConstants<double>::twoPi));
+
             float noise = rng.nextFloat() * 2.0f - 1.0f;
-            sample = (0.72f * osc1 + 0.28f * osc2 + noise * pval (apvts, "noise"));
+            float baseMix = 0.56f * osc1 + 0.30f * osc2
+                          + 0.52f * subLevel * sub
+                          + noise * pval (apvts, "noise");
+
+            const float ringAmount = pval (apvts, "ringMod");
+            float ring = osc1 * osc2;
+            sample = baseMix * (1.0f - ringAmount * 0.42f)
+                   + ring * ringAmount * 0.72f;
+
+            const float foldAmount = pval (apvts, "wavefold");
+            if (foldAmount > 0.0001f)
+            {
+                float folded = foldSample (sample * (1.0f + foldAmount * 5.5f));
+                sample = juce::jmap (foldAmount, sample, folded);
+            }
+
+            const float bodyLevel = pval (apvts, "bodyLevel");
+            const float bodyTune = pval (apvts, "bodyTune");
+            const float bodyHz = juce::jlimit (16.0f, 500.0f,
+                baseHz * std::pow (2.0f, bodyTune / 12.0f));
+            phaseBody += bodyHz / sr;
+            phaseBody -= std::floor (phaseBody);
+            float bodyOsc = std::sin ((float) (phaseBody * juce::MathConstants<double>::twoPi));
+            sample += bodyOsc * bodyEnv * bodyLevel * 0.72f;
 
             float cutoff = pval (apvts, "cutoff")
                          * std::pow (2.0f, lfo * pval (apvts, "lfoFilter"))
                          * (1.0f + envFilter * pval (apvts, "filterEnv"));
             cutoff = juce::jlimit (30.0f, (float) sr * 0.42f, cutoff);
 
+            const float filterDrive = pval (apvts, "filterDrive");
+            float filterInput = std::tanh (sample * (1.0f + filterDrive * 6.0f));
+
             float g = 1.0f - std::exp (-2.0f * juce::MathConstants<float>::pi * cutoff / (float) sr);
             float res = juce::jlimit (0.0f, 0.96f, pval (apvts, "resonance"));
-            float x = sample - z4 * res * 3.4f;
+            float x = filterInput - z4 * res * 3.4f;
             z1 += g * (std::tanh (x) - z1);
             z2 += g * (z1 - z2);
             z3 += g * (z2 - z3);
             z4 += g * (z3 - z4);
-            sample = z4;
 
-            sample = std::tanh (sample * pval (apvts, "drive")) * envAmp * velocity;
+            const float svfCut = juce::jmin (cutoff, (float) sr * 0.24f);
+            const float svfF = juce::jlimit (0.001f, 0.99f,
+                2.0f * std::sin (juce::MathConstants<float>::pi * svfCut / (float) sr));
+            const float damping = juce::jlimit (0.08f, 1.0f, 1.0f - res * 0.86f);
+            svfLow += svfF * svfBand;
+            float svfHigh = filterInput - svfLow - damping * svfBand;
+            svfBand += svfF * svfHigh;
+
+            const float morph = pval (apvts, "filterMorph");
+            if (morph < 0.5f)
+                sample = juce::jmap (morph * 2.0f, z4, svfLow);
+            else
+                sample = juce::jmap ((morph - 0.5f) * 2.0f, svfLow, svfBand);
+
+            const float drive = pval (apvts, "drive");
+            const float warmth = pval (apvts, "warmth");
+            sample = std::tanh (sample * drive * (1.0f + warmth * 0.85f))
+                   * envAmp * velocity;
+
+            float side = 0.0f;
+            const float width = pval (apvts, "stereoWidth");
+            if (buffer.getNumChannels() > 1)
+                side = (osc2 - osc1 + 0.35f * sub) * width * envAmp * velocity * 0.12f;
+
+            const float warmCut = 18000.0f - warmth * 10000.0f;
+            const float warmAlpha = 1.0f - std::exp (-2.0f * juce::MathConstants<float>::pi
+                                                   * warmCut / (float) sr);
+            float left = sample + side;
+            float right = sample - side;
+            warmL += warmAlpha * (left - warmL);
+            warmR += warmAlpha * (right - warmR);
+
+            left = std::tanh (warmL * (1.0f + warmth * 0.9f));
+            right = std::tanh (warmR * (1.0f + warmth * 0.9f));
+
+            if (buffer.getNumChannels() > 0)
+                buffer.setSample (0, n, left * 0.52f);
+            if (buffer.getNumChannels() > 1)
+                buffer.setSample (1, n, right * 0.52f);
+
             envAmp *= ampDecay;
             envFilter *= filtDecay;
+            bodyEnv *= envCoeff (pval (apvts, "bodyDecay"));
         }
 
-        for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
-            buffer.setSample (ch, n, sample * 0.55f);
+        if (envAmp <= 0.00002f)
+        {
+            warmL *= 0.995f;
+            warmR *= 0.995f;
+            if (buffer.getNumChannels() > 0)
+                buffer.setSample (0, n, warmL * 0.52f);
+            if (buffer.getNumChannels() > 1)
+                buffer.setSample (1, n, warmR * 0.52f);
+        }
     }
 }
 
@@ -234,6 +361,22 @@ ThreeRDIAnalogPercussionAudioProcessor::createParameterLayout()
     f ("lfoFm", "LFO to FM", 0, 1, 0);
     f ("filterEnv", "Filter Env", 0, 10, 5.5f);
     f ("pitchEnv", "Pitch Env", -24, 24, 0);
+
+    f ("shape1", "Osc 1 Shape", 0, 1, 0.18f);
+    f ("shape2", "Osc 2 Shape", 0, 1, 0.38f);
+    f ("subLevel", "Sub Level", 0, 1, 0.34f);
+    f ("ringMod", "Ring Mod", 0, 1, 0.08f);
+    f ("crossMod", "Cross Mod", 0, 1, 0.12f);
+    f ("wavefold", "Wavefold", 0, 1, 0.06f);
+    f ("bodyLevel", "Body Level", 0, 1, 0.32f);
+    f ("bodyTune", "Body Tune", -36, 12, -12);
+    f ("bodyDecay", "Body Decay ms", 50, 3000, 720, 800);
+    f ("filterMorph", "Filter Morph", 0, 1, 0.18f);
+    f ("filterDrive", "Filter Drive", 0, 1, 0.24f);
+    f ("drift", "Analog Drift", 0, 1, 0.20f);
+    f ("warmth", "Warmth", 0, 1, 0.48f);
+    f ("stereoWidth", "Stereo Width", 0, 1, 0.22f);
+
     f ("tempo", "Internal Tempo", 40, 300, 133, 133);
     p.push_back (std::make_unique<juce::AudioParameterBool> (juce::ParameterID{"hostSync", 1}, "Ableton Host Sync", true));
     p.push_back (std::make_unique<juce::AudioParameterBool> (juce::ParameterID{"run", 1}, "Run Sequencer", true));
