@@ -1,4 +1,4 @@
-name: Build 3RDI macOS Intel Installer DMG
+name: Build 3RDI macOS Intel App Installer DMG
 
 on:
   workflow_dispatch:
@@ -73,141 +73,120 @@ jobs:
           sleep 3
           /usr/bin/auval -v aumu R3ap Trdi
 
-      - name: Build component installer packages
+      - name: Build graphical installer app
         shell: bash
         run: |
           set -euo pipefail
-          WORK="$RUNNER_TEMP/3rdi-installer"
-          PKGS="$WORK/packages"
-          RES="$WORK/resources"
-          VROOT="$WORK/vst3-root"
-          AROOT="$WORK/au-root"
-          SCRIPTS="$WORK/scripts"
+          WORK="$RUNNER_TEMP/3rdi-app-installer"
+          APP="$WORK/Install 3RDI Analog Percussion.app"
+          RES="$APP/Contents/Resources"
+          mkdir -p "$RES/Plugins"
 
-          mkdir -p "$PKGS" "$RES" "$VROOT/Library/Audio/Plug-Ins/VST3" "$AROOT/Library/Audio/Plug-Ins/Components" "$SCRIPTS"
+          cat > "$WORK/installer.applescript" <<'APPLESCRIPT'
+          on run
+              set appPath to POSIX path of (path to me)
+              set resourcesPath to appPath & "Contents/Resources/Plugins/"
+              set homePath to POSIX path of (path to home folder)
+              set vst3Dir to homePath & "Library/Audio/Plug-Ins/VST3/"
+              set auDir to homePath & "Library/Audio/Plug-Ins/Components/"
 
-          ditto "${{ steps.locate.outputs.vst3 }}" "$VROOT/Library/Audio/Plug-Ins/VST3/3RDI Analog Percussion.vst3"
-          ditto "${{ steps.locate.outputs.au }}" "$AROOT/Library/Audio/Plug-Ins/Components/3RDI Analog Percussion.component"
+              set choiceResult to button returned of (display dialog "3RDI Analog Percussion\n\nChoose which plug-in format you want to install." buttons {"Cancel", "VST3 only", "VST3 + AU"} default button "VST3 + AU" with title "3RDI Analog Percussion Installer" with icon note)
 
-          cat > "$SCRIPTS/postinstall" <<'SCRIPT'
-          #!/bin/bash
-          killall -9 AudioComponentRegistrar 2>/dev/null || true
-          exit 0
-          SCRIPT
-          chmod +x "$SCRIPTS/postinstall"
+              if choiceResult is "Cancel" then return
 
-          pkgbuild \
-            --root "$VROOT" \
-            --identifier "com.threerdi.analogpercussion.vst3" \
-            --version "1.0.1" \
-            --install-location "/" \
-            "$PKGS/3RDI-VST3.pkg"
+              if choiceResult is "VST3 only" then
+                  my installVST3(resourcesPath, vst3Dir)
+                  display dialog "VST3 installed successfully.\n\nRestart Ableton Live and rescan plug-ins." buttons {"Done"} default button "Done" with title "3RDI Analog Percussion"
+                  return
+              end if
 
-          pkgbuild \
-            --root "$AROOT" \
-            --scripts "$SCRIPTS" \
-            --identifier "com.threerdi.analogpercussion.au" \
-            --version "1.0.1" \
-            --install-location "/" \
-            "$PKGS/3RDI-AU.pkg"
+              set auChoice to button returned of (display dialog "Install both VST3 and Audio Unit?" buttons {"AU only", "VST3 + AU"} default button "VST3 + AU" with title "Choose Formats")
 
-          cat > "$RES/welcome.html" <<'HTML'
-          <html><body style="font-family:-apple-system;font-size:13px">
-          <h2>3RDI Analog Percussion</h2>
-          <p>Intel macOS VST3 / Audio Unit installer for Ableton Live.</p>
-          <p>The next screen lets you choose which plugin formats to install.</p>
-          </body></html>
-          HTML
+              if auChoice is "AU only" then
+                  my installAU(resourcesPath, auDir)
+              else
+                  my installVST3(resourcesPath, vst3Dir)
+                  my installAU(resourcesPath, auDir)
+              end if
 
-          cat > "$RES/readme.html" <<'HTML'
-          <html><body style="font-family:-apple-system;font-size:13px">
-          <h3>Installation locations</h3>
-          <p><b>VST3:</b> /Library/Audio/Plug-Ins/VST3</p>
-          <p><b>Audio Unit:</b> /Library/Audio/Plug-Ins/Components</p>
-          <p>After installation, restart Ableton Live and rescan plug-ins if needed.</p>
-          </body></html>
-          HTML
+              try
+                  do shell script "killall -9 AudioComponentRegistrar >/dev/null 2>&1 || true"
+              end try
 
-          cat > "$RES/conclusion.html" <<'HTML'
-          <html><body style="font-family:-apple-system;font-size:13px">
-          <h2>Installation complete</h2>
-          <p>3RDI Analog Percussion has been installed.</p>
-          <p>Restart Ableton Live and run a plug-in rescan.</p>
-          </body></html>
-          HTML
+              display dialog "Installation complete.\n\nRestart Ableton Live, then open Settings → Plug-Ins and run a rescan." buttons {"Done"} default button "Done" with title "3RDI Analog Percussion"
+          end run
 
-          cat > "$WORK/Distribution.xml" <<'XML'
-          <?xml version="1.0" encoding="utf-8"?>
-          <installer-gui-script minSpecVersion="2">
-            <title>3RDI Analog Percussion</title>
-            <organization>com.threerdi.audio</organization>
-            <domains enable_localSystem="true"/>
-            <options customize="always" require-scripts="false" rootVolumeOnly="true"/>
-            <welcome file="welcome.html"/>
-            <readme file="readme.html"/>
-            <conclusion file="conclusion.html"/>
+          on installVST3(resourcesPath, targetDir)
+              do shell script "/bin/mkdir -p " & quoted form of targetDir
+              do shell script "/bin/rm -rf " & quoted form of (targetDir & "3RDI Analog Percussion.vst3")
+              do shell script "/usr/bin/ditto " & quoted form of (resourcesPath & "3RDI Analog Percussion.vst3") & " " & quoted form of (targetDir & "3RDI Analog Percussion.vst3")
+              try
+                  do shell script "/usr/bin/xattr -dr com.apple.quarantine " & quoted form of (targetDir & "3RDI Analog Percussion.vst3")
+              end try
+              try
+                  do shell script "/usr/bin/codesign --force --deep --sign - " & quoted form of (targetDir & "3RDI Analog Percussion.vst3")
+              end try
+          end installVST3
 
-            <choices-outline>
-              <line choice="vst3"/>
-              <line choice="au"/>
-            </choices-outline>
+          on installAU(resourcesPath, targetDir)
+              do shell script "/bin/mkdir -p " & quoted form of targetDir
+              do shell script "/bin/rm -rf " & quoted form of (targetDir & "3RDI Analog Percussion.component")
+              do shell script "/usr/bin/ditto " & quoted form of (resourcesPath & "3RDI Analog Percussion.component") & " " & quoted form of (targetDir & "3RDI Analog Percussion.component")
+              try
+                  do shell script "/usr/bin/xattr -dr com.apple.quarantine " & quoted form of (targetDir & "3RDI Analog Percussion.component")
+              end try
+              try
+                  do shell script "/usr/bin/codesign --force --deep --sign - " & quoted form of (targetDir & "3RDI Analog Percussion.component")
+              end try
+          end installAU
+          APPLESCRIPT
 
-            <choice id="vst3"
-                    title="VST3 Plug-In"
-                    description="Install the VST3 version for Ableton Live and other VST3 hosts"
-                    start_selected="true">
-              <pkg-ref id="com.threerdi.analogpercussion.vst3"/>
-            </choice>
+          /usr/bin/osacompile -o "$APP" "$WORK/installer.applescript"
 
-            <choice id="au"
-                    title="Audio Unit (AU)"
-                    description="Install the Audio Unit version for Ableton Live and other AU hosts"
-                    start_selected="true">
-              <pkg-ref id="com.threerdi.analogpercussion.au"/>
-            </choice>
+          mkdir -p "$RES/Plugins"
+          ditto "${{ steps.locate.outputs.vst3 }}" "$RES/Plugins/3RDI Analog Percussion.vst3"
+          ditto "${{ steps.locate.outputs.au }}" "$RES/Plugins/3RDI Analog Percussion.component"
 
-            <pkg-ref id="com.threerdi.analogpercussion.vst3"
-                     version="1.0.1"
-                     onConclusion="none">3RDI-VST3.pkg</pkg-ref>
-            <pkg-ref id="com.threerdi.analogpercussion.au"
-                     version="1.0.1"
-                     onConclusion="none">3RDI-AU.pkg</pkg-ref>
-          </installer-gui-script>
-          XML
+          /usr/bin/codesign --force --deep --sign - "$APP"
+          /usr/bin/codesign --verify --deep --strict "$APP"
 
-          productbuild \
-            --distribution "$WORK/Distribution.xml" \
-            --resources "$RES" \
-            --package-path "$PKGS" \
-            "$WORK/Install 3RDI Analog Percussion.pkg"
+          /usr/bin/osadecompile "$APP" > "$WORK/decompiled.applescript"
+          grep -q "VST3 + AU" "$WORK/decompiled.applescript"
+          grep -q "installVST3" "$WORK/decompiled.applescript"
+          grep -q "installAU" "$WORK/decompiled.applescript"
 
-          pkgutil --check-signature "$WORK/Install 3RDI Analog Percussion.pkg" || true
-          pkgutil --expand "$WORK/Install 3RDI Analog Percussion.pkg" "$WORK/expanded"
-          test -f "$WORK/expanded/Distribution"
-          grep -q 'VST3 Plug-In' "$WORK/expanded/Distribution"
-          grep -q 'Audio Unit (AU)' "$WORK/expanded/Distribution"
-
-      - name: Build graphical installer DMG
+      - name: Build DMG
         shell: bash
         run: |
           set -euo pipefail
-          WORK="$RUNNER_TEMP/3rdi-installer"
-          DMGROOT="$RUNNER_TEMP/3rdi-dmg"
+          WORK="$RUNNER_TEMP/3rdi-app-installer"
+          DMGROOT="$RUNNER_TEMP/3rdi-app-dmg"
           mkdir -p "$DMGROOT"
 
-          cp "$WORK/Install 3RDI Analog Percussion.pkg" "$DMGROOT/Install 3RDI Analog Percussion.pkg"
+          ditto "$WORK/Install 3RDI Analog Percussion.app" "$DMGROOT/Install 3RDI Analog Percussion.app"
 
           cat > "$DMGROOT/READ ME FIRST.txt" <<'TXT'
           3RDI ANALOG PERCUSSION — INTEL macOS
 
-          1. Double-click "Install 3RDI Analog Percussion.pkg"
-          2. The macOS Installer opens.
-          3. Choose VST3, Audio Unit, or both.
-          4. Complete installation.
-          5. Restart Ableton Live and rescan Plug-Ins.
+          Double-click:
+          Install 3RDI Analog Percussion.app
 
-          If macOS blocks the installer:
-          Control-click the package, choose Open, then confirm Open.
+          Then choose:
+          • VST3 only
+          • AU only
+          • VST3 + AU
+
+          Installation is performed in your user Library:
+          ~/Library/Audio/Plug-Ins/VST3
+          ~/Library/Audio/Plug-Ins/Components
+
+          No administrator password is required.
+
+          After installation:
+          Restart Ableton Live → Settings → Plug-Ins → Rescan.
+
+          If macOS shows a security warning:
+          Control-click the installer app → Open → Open.
           TXT
 
           hdiutil create \
@@ -215,27 +194,27 @@ jobs:
             -srcfolder "$DMGROOT" \
             -ov \
             -format UDBZ \
-            "$GITHUB_WORKSPACE/3RDI-Analog-Percussion-Intel-Self-Installer.dmg"
+            "$GITHUB_WORKSPACE/3RDI-Analog-Percussion-Intel-Graphical-Installer.dmg"
 
-      - name: Validate DMG contents
+      - name: Validate DMG mount and installer
         shell: bash
         run: |
           set -euo pipefail
-          DMG="3RDI-Analog-Percussion-Intel-Self-Installer.dmg"
-          test -s "$DMG"
-          MOUNT="$RUNNER_TEMP/mount"
+          DMG="3RDI-Analog-Percussion-Intel-Graphical-Installer.dmg"
+          MOUNT="$RUNNER_TEMP/3rdi-mount"
           mkdir -p "$MOUNT"
           hdiutil attach "$DMG" -mountpoint "$MOUNT" -nobrowse
-          test -f "$MOUNT/Install 3RDI Analog Percussion.pkg"
+          test -d "$MOUNT/Install 3RDI Analog Percussion.app"
           test -f "$MOUNT/READ ME FIRST.txt"
-          pkgutil --expand "$MOUNT/Install 3RDI Analog Percussion.pkg" "$RUNNER_TEMP/final-expanded"
-          test -f "$RUNNER_TEMP/final-expanded/Distribution"
+          test -d "$MOUNT/Install 3RDI Analog Percussion.app/Contents/Resources/Plugins/3RDI Analog Percussion.vst3"
+          test -d "$MOUNT/Install 3RDI Analog Percussion.app/Contents/Resources/Plugins/3RDI Analog Percussion.component"
+          codesign --verify --deep --strict "$MOUNT/Install 3RDI Analog Percussion.app"
           hdiutil detach "$MOUNT"
           shasum -a 256 "$DMG"
 
-      - name: Upload installer DMG
+      - name: Upload graphical installer DMG
         uses: actions/upload-artifact@v4
         with:
-          name: 3RDI-Analog-Percussion-Intel-Self-Installer-DMG
-          path: 3RDI-Analog-Percussion-Intel-Self-Installer.dmg
+          name: 3RDI-Analog-Percussion-Intel-Graphical-Installer-DMG
+          path: 3RDI-Analog-Percussion-Intel-Graphical-Installer.dmg
           if-no-files-found: error
