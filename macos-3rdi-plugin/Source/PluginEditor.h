@@ -24,6 +24,8 @@ private:
                                float, float, juce::Slider&) override;
         void drawButtonBackground (juce::Graphics&, juce::Button&,
                                    const juce::Colour&, bool, bool) override;
+        void drawButtonText (juce::Graphics&, juce::TextButton&,
+                             bool, bool) override;
         void drawLinearSlider (juce::Graphics&, int, int, int, int,
                                float, float, float,
                                juce::Slider::SliderStyle, juce::Slider&) override;
@@ -72,6 +74,8 @@ private:
     void savePreset();
     void loadPreset();
     void resetToDefaults();
+    void nudgeTempo (float deltaBpm);
+    void registerTapTempo();
 
     ThreeRDIAnalogPercussionAudioProcessor& processor;
     AnalogLookAndFeel look;
@@ -88,7 +92,10 @@ private:
     juce::TextButton themeButton { "THEME" };
     juce::TextButton saveButton { "SAVE" };
     juce::TextButton loadButton { "LOAD" };
-    juce::TextButton prefsButton { "PREFERENCES" };
+    juce::TextButton prefsButton { "⚙ PREFERENCES" };
+    juce::TextButton tempoDownButton { "◀" };
+    juce::TextButton tempoUpButton { "▶" };
+    juce::TextButton tapButton { "TAP" };
     juce::TextButton runButton { "STOP" };
     juce::TextButton trigButton { "TRIG" };
     juce::TextButton randButton { "RAND" };
@@ -99,6 +106,8 @@ private:
     std::unique_ptr<juce::FileChooser> presetChooser;
 
     int64 lastThemeSignature = 0;
+    double lastTapMs = 0.0;
+    double smoothedTapIntervalMs = 0.0;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ThreeRDIAnalogPercussionAudioProcessorEditor)
 };
