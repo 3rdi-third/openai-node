@@ -48,53 +48,72 @@ void ThreeRDIAnalogPercussionAudioProcessorEditor::AnalogLookAndFeel::setTheme
 
 void ThreeRDIAnalogPercussionAudioProcessorEditor::AnalogLookAndFeel::drawRotarySlider
     (juce::Graphics& g, int x, int y, int width, int height, float sliderPos,
-     float rotaryStartAngle, float rotaryEndAngle, juce::Slider&)
+     float rotaryStartAngle, float rotaryEndAngle, juce::Slider& slider)
 {
-    auto diameter = (float) juce::jmin (width, height) - 14.0f;
+    auto diameter = (float) juce::jmin (width, height) - 18.0f;
     auto radius = diameter * 0.5f;
     auto cx = (float) x + (float) width * 0.5f;
-    auto cy = (float) y + (float) height * 0.44f;
+    auto cy = (float) y + (float) height * 0.43f;
     auto r = juce::Rectangle<float> (cx - radius, cy - radius, diameter, diameter);
 
     const float startA = -2.35f;
     const float endA = 2.35f;
 
-    g.setColour (textColour.withAlpha (0.42f));
+    // Engraved scale ticks.
+    g.setColour (textColour.withAlpha (0.52f));
     for (int i = 0; i <= 10; ++i)
     {
-        auto a = juce::jmap ((float) i / 10.0f, startA, endA);
-        auto inner = radius + 4.0f;
-        auto outer = radius + (i % 5 == 0 ? 10.0f : 8.0f);
+        const auto a = juce::jmap ((float) i / 10.0f, startA, endA);
+        const auto inner = radius + 5.0f;
+        const auto outer = radius + (i % 5 == 0 ? 12.0f : 9.0f);
         juce::Point<float> p1 (cx + std::sin (a) * inner, cy - std::cos (a) * inner);
         juce::Point<float> p2 (cx + std::sin (a) * outer, cy - std::cos (a) * outer);
-        g.drawLine ({p1, p2}, i % 5 == 0 ? 1.7f : 1.0f);
+        g.drawLine ({p1, p2}, i % 5 == 0 ? 1.8f : 1.0f);
     }
 
-    g.setColour (juce::Colours::black.withAlpha (0.22f));
-    g.fillEllipse (r.translated (2.5f, 4.0f).expanded (4.0f));
+    // Multi-layer drop shadow.
+    g.setColour (juce::Colours::black.withAlpha (0.09f));
+    g.fillEllipse (r.translated (4.0f, 7.0f).expanded (7.0f));
+    g.setColour (juce::Colours::black.withAlpha (0.18f));
+    g.fillEllipse (r.translated (2.5f, 4.5f).expanded (4.5f));
 
-    g.setColour (juce::Colour::fromRGB (28, 27, 24));
-    g.fillEllipse (r.expanded (4.0f));
-    g.setColour (accentColour.darker (0.48f));
-    g.drawEllipse (r.expanded (3.0f), 2.0f);
+    // Black rubber bezel.
+    juce::ColourGradient bezel (juce::Colour::fromRGB (52, 49, 44), cx - radius, cy - radius,
+                                juce::Colour::fromRGB (12, 12, 11), cx + radius, cy + radius, false);
+    g.setGradientFill (bezel);
+    g.fillEllipse (r.expanded (5.0f));
+    g.setColour (juce::Colours::black.withAlpha (0.72f));
+    g.drawEllipse (r.expanded (5.0f), 1.5f);
 
-    juce::ColourGradient face (knobColour.brighter (0.18f), cx - radius * 0.4f, cy - radius * 0.55f,
-                               knobColour.darker (0.16f), cx + radius * 0.45f, cy + radius * 0.55f, false);
+    // Orange 3D cap.
+    juce::ColourGradient face (knobColour.brighter (0.30f), cx - radius * 0.55f, cy - radius * 0.65f,
+                               knobColour.darker (0.26f), cx + radius * 0.55f, cy + radius * 0.65f, false);
     g.setGradientFill (face);
-    g.fillEllipse (r.reduced (2.5f));
+    g.fillEllipse (r.reduced (1.8f));
 
-    g.setColour (juce::Colours::black.withAlpha (0.20f));
-    g.drawEllipse (r.reduced (3.0f), 1.3f);
+    // Specular highlight.
+    g.setColour (juce::Colours::white.withAlpha (0.13f));
+    g.fillEllipse (r.reduced (8.0f).withHeight (r.getHeight() * 0.32f).translated (0.0f, 3.0f));
+    g.setColour (accentColour.darker (0.22f));
+    g.drawEllipse (r.reduced (2.0f), 1.3f);
 
-    auto angle = rotaryStartAngle + sliderPos * (rotaryEndAngle - rotaryStartAngle);
+    const auto angle = rotaryStartAngle + sliderPos * (rotaryEndAngle - rotaryStartAngle);
     juce::Path pointer;
-    pointer.addRoundedRectangle (-2.0f, -radius * 0.78f, 4.0f, radius * 0.62f, 2.0f);
+    pointer.addRoundedRectangle (-2.2f, -radius * 0.82f, 4.4f, radius * 0.66f, 2.2f);
     pointer.applyTransform (juce::AffineTransform::rotation (angle).translated (cx, cy));
-    g.setColour (juce::Colours::white.withAlpha (0.92f));
+    g.setColour (juce::Colours::white.withAlpha (0.94f));
     g.fillPath (pointer);
 
-    g.setColour (textColour.withAlpha (0.75f));
-    g.fillEllipse (cx - 2.4f, cy - 2.4f, 4.8f, 4.8f);
+    // Range markings matching the reference panel.
+    juce::String left = "0", right = "100";
+    if (slider.getName() == "cutoff")      { left = "20"; right = "20k"; }
+    else if (slider.getName() == "lfoRate"){ left = "0.1"; right = "20"; }
+    else if (slider.getName() == "bodyTune"){ left = "-24"; right = "+24"; }
+
+    g.setColour (textColour.withAlpha (0.90f));
+    g.setFont (juce::FontOptions (8.5f, juce::Font::bold));
+    g.drawText (left, x, (int) (cy + radius + 7.0f), width / 2, 14, juce::Justification::centredLeft);
+    g.drawText (right, x + width / 2, (int) (cy + radius + 7.0f), width / 2, 14, juce::Justification::centredRight);
 }
 
 void ThreeRDIAnalogPercussionAudioProcessorEditor::AnalogLookAndFeel::drawButtonBackground
@@ -103,30 +122,71 @@ void ThreeRDIAnalogPercussionAudioProcessorEditor::AnalogLookAndFeel::drawButton
     auto r = b.getLocalBounds().toFloat().reduced (1.5f);
     const bool pad = b.getName() == "STEP_PAD";
     const bool transport = b.getName() == "TRANSPORT";
+    const bool small = b.getName() == "TEMPO_SMALL";
 
-    g.setColour (juce::Colours::black.withAlpha (0.18f));
+    // Heavy hardware shadow.
+    g.setColour (juce::Colours::black.withAlpha (0.14f));
+    g.fillRoundedRectangle (r.translated (3.0f, 5.0f), 6.0f);
+    g.setColour (juce::Colours::black.withAlpha (0.20f));
     g.fillRoundedRectangle (r.translated (1.5f, 2.5f), 6.0f);
 
-    juce::Colour fill = panelColour.darker (0.03f);
-    if (pad || transport)
-        fill = juce::Colour::fromRGB (30, 29, 26);
-
-    if (b.getToggleState())
-        fill = pad || transport ? juce::Colour::fromRGB (42, 35, 29) : knobColour.withAlpha (0.78f);
-
-    if (over) fill = fill.brighter (0.07f);
-    if (down) fill = fill.darker (0.12f);
-
-    g.setColour (fill);
-    g.fillRoundedRectangle (r, 6.0f);
-    g.setColour (b.getToggleState() ? knobColour : accentColour.withAlpha (0.88f));
-    g.drawRoundedRectangle (r, 6.0f, b.getToggleState() ? 2.6f : 1.5f);
-
+    juce::Colour top = panelColour.brighter (0.13f);
+    juce::Colour bottom = panelColour.darker (0.13f);
     if (pad || transport)
     {
-        g.setColour (juce::Colours::white.withAlpha (0.08f));
-        g.drawRoundedRectangle (r.reduced (3.0f), 4.0f, 1.0f);
+        top = juce::Colour::fromRGB (54, 52, 48);
+        bottom = juce::Colour::fromRGB (18, 18, 16);
     }
+
+    if (b.getToggleState())
+    {
+        if (pad || transport)
+        {
+            top = juce::Colour::fromRGB (65, 47, 31);
+            bottom = juce::Colour::fromRGB (27, 24, 21);
+        }
+        else
+        {
+            top = knobColour.brighter (0.12f);
+            bottom = knobColour.darker (0.18f);
+        }
+    }
+
+    if (over) top = top.brighter (0.07f);
+    if (down) { top = top.darker (0.12f); bottom = bottom.darker (0.10f); }
+
+    juce::ColourGradient face (top, r.getX(), r.getY(),
+                               bottom, r.getX(), r.getBottom(), false);
+    g.setGradientFill (face);
+    g.fillRoundedRectangle (r, small ? 4.0f : 6.0f);
+
+    g.setColour ((b.getToggleState() ? knobColour : accentColour).withAlpha (0.92f));
+    g.drawRoundedRectangle (r, small ? 4.0f : 6.0f, b.getToggleState() ? 2.5f : 1.4f);
+
+    // Top bevel / gloss.
+    g.setColour (juce::Colours::white.withAlpha ((pad || transport) ? 0.06f : 0.18f));
+    g.drawLine (r.getX() + 5.0f, r.getY() + 4.0f, r.getRight() - 5.0f, r.getY() + 4.0f, 1.2f);
+
+    if ((pad || transport) && b.getToggleState())
+    {
+        g.setColour (knobColour.withAlpha (0.18f));
+        g.drawRoundedRectangle (r.expanded (3.0f), 8.0f, 3.0f);
+    }
+}
+
+void ThreeRDIAnalogPercussionAudioProcessorEditor::AnalogLookAndFeel::drawButtonText
+    (juce::Graphics& g, juce::TextButton& button, bool, bool)
+{
+    const bool dark = button.getName() == "STEP_PAD" || button.getName() == "TRANSPORT";
+    g.setColour (dark ? (button.getToggleState() ? knobColour.brighter (0.18f) : juce::Colours::white.withAlpha (0.92f))
+                      : textColour);
+
+    const float fontSize = button.getName() == "STEP_PAD" ? 18.0f
+                         : button.getName() == "TRANSPORT" ? 13.0f
+                         : button.getName() == "TEMPO_SMALL" ? 12.0f : 13.5f;
+    g.setFont (juce::FontOptions (fontSize, juce::Font::bold));
+    g.drawFittedText (button.getButtonText(), button.getLocalBounds().reduced (4),
+                      juce::Justification::centred, 1);
 }
 
 void ThreeRDIAnalogPercussionAudioProcessorEditor::AnalogLookAndFeel::drawLinearSlider
@@ -260,6 +320,21 @@ ThreeRDIAnalogPercussionAudioProcessorEditor::ThreeRDIAnalogPercussionAudioProce
     addAndMakeVisible (tempoSlider);
     tempoAttachment = std::make_unique<SliderAttachment> (processor.apvts, "tempo", tempoSlider);
 
+    tempoDownButton.setName ("TEMPO_SMALL");
+    tempoDownButton.setBounds (48, 246, 62, 28);
+    tempoDownButton.onClick = [this] { nudgeTempo (-1.0f); };
+    addAndMakeVisible (tempoDownButton);
+
+    tempoUpButton.setName ("TEMPO_SMALL");
+    tempoUpButton.setBounds (122, 246, 62, 28);
+    tempoUpButton.onClick = [this] { nudgeTempo (1.0f); };
+    addAndMakeVisible (tempoUpButton);
+
+    tapButton.setName ("TEMPO_SMALL");
+    tapButton.setBounds (48, 278, 136, 28);
+    tapButton.onClick = [this] { registerTapTempo(); };
+    addAndMakeVisible (tapButton);
+
     driveSlider.setSliderStyle (juce::Slider::LinearHorizontal);
     driveSlider.setTextBoxStyle (juce::Slider::TextBoxRight, false, 54, 22);
     driveSlider.setBounds (815, 690, 255, 42);
@@ -319,9 +394,10 @@ void ThreeRDIAnalogPercussionAudioProcessorEditor::addKnob
 {
     auto s = std::make_unique<juce::Slider>();
     s->setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
-    s->setTextBoxStyle (juce::Slider::TextBoxBelow, false,
-                        bounds.getWidth() + (small ? 16 : 22), small ? 18 : 21);
+    s->setName (paramId);
+    s->setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
     s->setTextValueSuffix (suffix);
+    s->setPopupDisplayEnabled (true, false, this);
     s->setNumDecimalPlacesToDisplay (decimals);
     s->setColour (juce::Slider::textBoxTextColourId, look.textColour);
     s->setColour (juce::Slider::textBoxBackgroundColourId, juce::Colours::transparentBlack);
@@ -537,6 +613,9 @@ void ThreeRDIAnalogPercussionAudioProcessorEditor::applyThemeFromState (bool for
     configureButton (runButton);
     configureButton (trigButton);
     configureButton (randButton);
+    configureButton (tempoDownButton);
+    configureButton (tempoUpButton);
+    configureButton (tapButton);
     for (auto& pad : stepPads)
         if (pad != nullptr)
         {
@@ -692,6 +771,49 @@ void ThreeRDIAnalogPercussionAudioProcessorEditor::resetToDefaults()
     }
 
     setThemePreset (1);
+}
+
+void ThreeRDIAnalogPercussionAudioProcessorEditor::nudgeTempo (float deltaBpm)
+{
+    if (auto* parameter = processor.apvts.getParameter ("tempo"))
+    {
+        const float current = processor.apvts.getRawParameterValue ("tempo")->load();
+        const float target = juce::jlimit (40.0f, 300.0f, current + deltaBpm);
+        parameter->beginChangeGesture();
+        parameter->setValueNotifyingHost (parameter->convertTo0to1 (target));
+        parameter->endChangeGesture();
+    }
+}
+
+void ThreeRDIAnalogPercussionAudioProcessorEditor::registerTapTempo()
+{
+    const double now = juce::Time::getMillisecondCounterHiRes();
+
+    if (lastTapMs > 0.0)
+    {
+        const double interval = now - lastTapMs;
+        if (interval >= 200.0 && interval <= 1500.0)
+        {
+            smoothedTapIntervalMs = smoothedTapIntervalMs <= 0.0
+                                  ? interval
+                                  : smoothedTapIntervalMs * 0.55 + interval * 0.45;
+
+            const float bpm = juce::jlimit (40.0f, 300.0f,
+                                            (float) (60000.0 / smoothedTapIntervalMs));
+            if (auto* parameter = processor.apvts.getParameter ("tempo"))
+            {
+                parameter->beginChangeGesture();
+                parameter->setValueNotifyingHost (parameter->convertTo0to1 (bpm));
+                parameter->endChangeGesture();
+            }
+        }
+        else
+        {
+            smoothedTapIntervalMs = 0.0;
+        }
+    }
+
+    lastTapMs = now;
 }
 
 void ThreeRDIAnalogPercussionAudioProcessorEditor::resized()
