@@ -1,0 +1,222 @@
+name: Build 3RDI macOS Apple Silicon App Installer DMG
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'macos-3rdi-plugin/**'
+      - '.github/workflows/build-3rdi-macos-silicon-plugin.yml'
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify Apple Silicon runner
+        run: |
+          set -euxo pipefail
+          test "$(uname -m)" = "arm64"
+          xcodebuild -version
+
+      - name: Configure JUCE project
+        run: |
+          cmake -S macos-3rdi-plugin -B macos-3rdi-plugin/build-silicon \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_OSX_ARCHITECTURES=arm64 \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
+
+      - name: Build VST3 and AU
+        run: cmake --build macos-3rdi-plugin/build-silicon --config Release --parallel 3
+
+      - name: Locate plugin bundles
+        id: locate
+        shell: bash
+        run: |
+          set -euo pipefail
+          VST3="$(find macos-3rdi-plugin/build-silicon -type d -name '3RDI Analog Percussion.vst3' | head -n1)"
+          AU="$(find macos-3rdi-plugin/build-silicon -type d -name '3RDI Analog Percussion.component' | head -n1)"
+          test -n "$VST3"
+          test -n "$AU"
+          echo "vst3=$VST3" >> "$GITHUB_OUTPUT"
+          echo "au=$AU" >> "$GITHUB_OUTPUT"
+
+      - name: Verify native arm64 architecture
+        shell: bash
+        run: |
+          set -euo pipefail
+          VST3_BIN="${{ steps.locate.outputs.vst3 }}/Contents/MacOS/3RDI Analog Percussion"
+          AU_BIN="${{ steps.locate.outputs.au }}/Contents/MacOS/3RDI Analog Percussion"
+          file "$VST3_BIN"
+          file "$AU_BIN"
+          file "$VST3_BIN" | grep -q 'arm64'
+          file "$AU_BIN" | grep -q 'arm64'
+          lipo -info "$VST3_BIN"
+          lipo -info "$AU_BIN"
+
+      - name: Ad-hoc sign plugins
+        run: |
+          codesign --force --deep --sign - "${{ steps.locate.outputs.vst3 }}"
+          codesign --force --deep --sign - "${{ steps.locate.outputs.au }}"
+          codesign --verify --deep --strict "${{ steps.locate.outputs.vst3 }}"
+          codesign --verify --deep --strict "${{ steps.locate.outputs.au }}"
+
+      - name: Validate AU natively
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/Library/Audio/Plug-Ins/Components"
+          rm -rf "$HOME/Library/Audio/Plug-Ins/Components/3RDI Analog Percussion.component"
+          ditto "${{ steps.locate.outputs.au }}" "$HOME/Library/Audio/Plug-Ins/Components/3RDI Analog Percussion.component"
+          killall -9 AudioComponentRegistrar 2>/dev/null || true
+          sleep 3
+          /usr/bin/auval -v aumu R3ap Trdi
+
+      - name: Build graphical installer app
+        shell: bash
+        run: |
+          set -euo pipefail
+          WORK="$RUNNER_TEMP/3rdi-silicon-installer"
+          APP="$WORK/Install 3RDI Analog Percussion.app"
+          RES="$APP/Contents/Resources"
+          mkdir -p "$WORK"
+          rm -rf "$APP"
+
+          cat > "$WORK/installer.applescript" <<'APPLESCRIPT'
+          on run
+              set appPath to POSIX path of (path to me)
+              set resourcesPath to appPath & "Contents/Resources/Plugins/"
+              set homePath to POSIX path of (path to home folder)
+              set vst3Dir to homePath & "Library/Audio/Plug-Ins/VST3/"
+              set auDir to homePath & "Library/Audio/Plug-Ins/Components/"
+
+              set choiceResult to button returned of (display dialog "3RDI Analog Percussion — Apple Silicon\n\nChoose which plug-in format you want to install." buttons {"Cancel", "VST3 only", "VST3 + AU"} default button "VST3 + AU" with title "3RDI Analog Percussion Installer" with icon note)
+              if choiceResult is "Cancel" then return
+
+              if choiceResult is "VST3 only" then
+                  my installVST3(resourcesPath, vst3Dir)
+                  display dialog "VST3 installed successfully.\n\nRestart Ableton Live and rescan plug-ins." buttons {"Done"} default button "Done" with title "3RDI Analog Percussion"
+                  return
+              end if
+
+              set auChoice to button returned of (display dialog "Install both VST3 and Audio Unit?" buttons {"AU only", "VST3 + AU"} default button "VST3 + AU" with title "Choose Formats")
+
+              if auChoice is "AU only" then
+                  my installAU(resourcesPath, auDir)
+              else
+                  my installVST3(resourcesPath, vst3Dir)
+                  my installAU(resourcesPath, auDir)
+              end if
+
+              try
+                  do shell script "killall -9 AudioComponentRegistrar >/dev/null 2>&1 || true"
+              end try
+
+              display dialog "Installation complete.\n\nRestart Ableton Live, then open Settings → Plug-Ins and run a rescan." buttons {"Done"} default button "Done" with title "3RDI Analog Percussion"
+          end run
+
+          on installVST3(resourcesPath, targetDir)
+              do shell script "/bin/mkdir -p " & quoted form of targetDir
+              do shell script "/bin/rm -rf " & quoted form of (targetDir & "3RDI Analog Percussion.vst3")
+              do shell script "/usr/bin/ditto " & quoted form of (resourcesPath & "3RDI Analog Percussion.vst3") & " " & quoted form of (targetDir & "3RDI Analog Percussion.vst3")
+              try
+                  do shell script "/usr/bin/xattr -dr com.apple.quarantine " & quoted form of (targetDir & "3RDI Analog Percussion.vst3")
+              end try
+              try
+                  do shell script "/usr/bin/codesign --force --deep --sign - " & quoted form of (targetDir & "3RDI Analog Percussion.vst3")
+              end try
+          end installVST3
+
+          on installAU(resourcesPath, targetDir)
+              do shell script "/bin/mkdir -p " & quoted form of targetDir
+              do shell script "/bin/rm -rf " & quoted form of (targetDir & "3RDI Analog Percussion.component")
+              do shell script "/usr/bin/ditto " & quoted form of (resourcesPath & "3RDI Analog Percussion.component") & " " & quoted form of (targetDir & "3RDI Analog Percussion.component")
+              try
+                  do shell script "/usr/bin/xattr -dr com.apple.quarantine " & quoted form of (targetDir & "3RDI Analog Percussion.component")
+              end try
+              try
+                  do shell script "/usr/bin/codesign --force --deep --sign - " & quoted form of (targetDir & "3RDI Analog Percussion.component")
+              end try
+          end installAU
+          APPLESCRIPT
+
+          /usr/bin/osacompile -o "$APP" "$WORK/installer.applescript"
+
+          mkdir -p "$RES/Plugins"
+          ditto "${{ steps.locate.outputs.vst3 }}" "$RES/Plugins/3RDI Analog Percussion.vst3"
+          ditto "${{ steps.locate.outputs.au }}" "$RES/Plugins/3RDI Analog Percussion.component"
+
+          /usr/bin/codesign --force --deep --sign - "$APP"
+          /usr/bin/codesign --verify --deep --strict "$APP"
+
+      - name: Build Apple Silicon DMG
+        shell: bash
+        run: |
+          set -euo pipefail
+          WORK="$RUNNER_TEMP/3rdi-silicon-installer"
+          DMGROOT="$RUNNER_TEMP/3rdi-silicon-dmg"
+          mkdir -p "$DMGROOT"
+
+          ditto "$WORK/Install 3RDI Analog Percussion.app" "$DMGROOT/Install 3RDI Analog Percussion.app"
+
+          cat > "$DMGROOT/READ ME FIRST.txt" <<'TXT'
+          3RDI ANALOG PERCUSSION — APPLE SILICON macOS
+
+          Native arm64 build for Apple Silicon Macs.
+
+          Double-click:
+          Install 3RDI Analog Percussion.app
+
+          Then choose:
+          • VST3 only
+          • AU only
+          • VST3 + AU
+
+          Installs to:
+          ~/Library/Audio/Plug-Ins/VST3
+          ~/Library/Audio/Plug-Ins/Components
+
+          Restart Ableton Live → Settings → Plug-Ins → Rescan.
+
+          If macOS shows a security warning:
+          Control-click the installer app → Open → Open.
+          TXT
+
+          hdiutil create \
+            -volname "3RDI Analog Percussion Apple Silicon" \
+            -srcfolder "$DMGROOT" \
+            -ov \
+            -format UDBZ \
+            "$GITHUB_WORKSPACE/3RDI-Analog-Percussion-Apple-Silicon-Graphical-Installer.dmg"
+
+      - name: Validate DMG mount and embedded arm64 plugins
+        shell: bash
+        run: |
+          set -euo pipefail
+          DMG="3RDI-Analog-Percussion-Apple-Silicon-Graphical-Installer.dmg"
+          MOUNT="$RUNNER_TEMP/3rdi-silicon-mount"
+          mkdir -p "$MOUNT"
+          hdiutil attach "$DMG" -mountpoint "$MOUNT" -nobrowse
+
+          APP="$MOUNT/Install 3RDI Analog Percussion.app"
+          test -d "$APP"
+          test -f "$MOUNT/READ ME FIRST.txt"
+          codesign --verify --deep --strict "$APP"
+
+          VST3_BIN="$APP/Contents/Resources/Plugins/3RDI Analog Percussion.vst3/Contents/MacOS/3RDI Analog Percussion"
+          AU_BIN="$APP/Contents/Resources/Plugins/3RDI Analog Percussion.component/Contents/MacOS/3RDI Analog Percussion"
+          file "$VST3_BIN" | grep -q 'arm64'
+          file "$AU_BIN" | grep -q 'arm64'
+
+          hdiutil detach "$MOUNT"
+          shasum -a 256 "$DMG"
+
+      - name: Upload Apple Silicon DMG
+        uses: actions/upload-artifact@v4
+        with:
+          name: 3RDI-Analog-Percussion-Apple-Silicon-Graphical-Installer-DMG
+          path: 3RDI-Analog-Percussion-Apple-Silicon-Graphical-Installer.dmg
+          if-no-files-found: error
