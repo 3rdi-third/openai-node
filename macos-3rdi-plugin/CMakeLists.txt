@@ -20,6 +20,12 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(JUCE)
 
+if(APPLE)
+  set(THREERDI_FORMATS VST3 AU)
+else()
+  set(THREERDI_FORMATS VST3 Standalone)
+endif()
+
 juce_add_plugin(ThreeRDIAnalogPercussion
   COMPANY_NAME "3RDI Audio Labs"
   BUNDLE_ID "com.threerdi.analogpercussion"
@@ -31,7 +37,7 @@ juce_add_plugin(ThreeRDIAnalogPercussion
   COPY_PLUGIN_AFTER_BUILD FALSE
   PLUGIN_MANUFACTURER_CODE Trdi
   PLUGIN_CODE R3ap
-  FORMATS VST3 AU
+  FORMATS ${THREERDI_FORMATS}
   PRODUCT_NAME "3RDI Analog Percussion"
 )
 
