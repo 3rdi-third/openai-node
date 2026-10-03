@@ -1,0 +1,116 @@
+name: Build 3RDI Windows x64 VST3 EXE Installer
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'macos-3rdi-plugin/**'
+      - 'windows-installer/**'
+      - '.github/workflows/build-3rdi-windows-plugin.yml'
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure MSVC environment
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Configure JUCE Windows project
+        shell: pwsh
+        run: |
+          cmake -S macos-3rdi-plugin -B windows-build -G "Visual Studio 17 2022" -A x64
+
+      - name: Build VST3 and Standalone
+        shell: pwsh
+        run: |
+          cmake --build windows-build --config Release --parallel 3
+
+      - name: Locate Windows binaries
+        id: locate
+        shell: pwsh
+        run: |
+          $vst3 = Get-ChildItem -Path windows-build -Recurse -Directory -Filter "3RDI Analog Percussion.vst3" | Select-Object -First 1
+          $standalone = Get-ChildItem -Path windows-build -Recurse -File -Filter "3RDI Analog Percussion.exe" |
+            Where-Object { $_.FullName -match "Standalone" } | Select-Object -First 1
+
+          if (-not $vst3) { throw "VST3 bundle not found" }
+          if (-not $standalone) { throw "Standalone EXE not found" }
+
+          "vst3=$($vst3.FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "standalone=$($standalone.FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+          Write-Host "VST3: $($vst3.FullName)"
+          Write-Host "Standalone: $($standalone.FullName)"
+
+      - name: Verify Windows x64 binaries
+        shell: pwsh
+        run: |
+          $vst3Dll = Get-ChildItem -Path "${{ steps.locate.outputs.vst3 }}" -Recurse -File -Filter "*.vst3" | Select-Object -First 1
+          if (-not $vst3Dll) {
+            $vst3Dll = Get-ChildItem -Path "${{ steps.locate.outputs.vst3 }}" -Recurse -File | Where-Object { $_.Name -eq "3RDI Analog Percussion.vst3" } | Select-Object -First 1
+          }
+          if (-not $vst3Dll) { throw "VST3 binary file not found" }
+
+          dumpbin /headers "$($vst3Dll.FullName)" | Select-String "machine (x64)"
+          if ($LASTEXITCODE -ne 0) { throw "VST3 is not x64" }
+
+          dumpbin /headers "${{ steps.locate.outputs.standalone }}" | Select-String "machine (x64)"
+          if ($LASTEXITCODE -ne 0) { throw "Standalone is not x64" }
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            choco install innosetup --no-progress -y
+          }
+
+      - name: Build graphical EXE installer
+        shell: pwsh
+        run: |
+          $env:VST3_SOURCE = "${{ steps.locate.outputs.vst3 }}"
+          $env:STANDALONE_SOURCE = "${{ steps.locate.outputs.standalone }}"
+          $env:OUTPUT_DIR = "$env:GITHUB_WORKSPACE\windows-dist"
+
+          New-Item -ItemType Directory -Force -Path $env:OUTPUT_DIR | Out-Null
+
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          & $iscc "windows-installer\3rdi-analog-percussion.iss"
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup compilation failed" }
+
+      - name: Validate installer
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem windows-dist -Filter "*.exe" | Select-Object -First 1
+          if (-not $setup) { throw "Setup EXE not found" }
+
+          Write-Host "Installer: $($setup.FullName)"
+          Write-Host "Size: $($setup.Length) bytes"
+
+          dumpbin /headers "$($setup.FullName)" | Select-String "machine (x64)"
+          if ($LASTEXITCODE -ne 0) { throw "Installer launcher is not x64" }
+
+          Get-FileHash "$($setup.FullName)" -Algorithm SHA256
+
+      - name: Upload Windows EXE installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: 3RDI-Analog-Percussion-Windows-x64-Setup
+          path: windows-dist/3RDI-Analog-Percussion-Windows-x64-Setup.exe
+          if-no-files-found: error
+
+      - name: Upload raw VST3 and standalone
+        uses: actions/upload-artifact@v4
+        with:
+          name: 3RDI-Analog-Percussion-Windows-x64-Raw
+          path: |
+            ${{ steps.locate.outputs.vst3 }}
+            ${{ steps.locate.outputs.standalone }}
+          if-no-files-found: error
