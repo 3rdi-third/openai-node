@@ -1,0 +1,105 @@
+name: RaggKick 1.1 Intel Build
+
+on:
+  push:
+    branches: [ "raggkick-build-1.1" ]
+    paths:
+      - "raggkick-build-1.1/**"
+      - ".github/workflows/raggkick-intel-build.yml"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-15-intel
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Restore RaggKick source
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat raggkick-build-1.1/part* > RaggKick-1.1.0-source.zip.b64
+          python3 - <<'PY'
+          import base64, pathlib
+          p = pathlib.Path("RaggKick-1.1.0-source.zip.b64")
+          raw = base64.b64decode(p.read_text().strip(), validate=True)
+          pathlib.Path("RaggKick-1.1.0-source.zip").write_bytes(raw)
+          print("decoded bytes:", len(raw))
+          PY
+          rm -rf _raggkick_src
+          mkdir _raggkick_src
+          unzip -t RaggKick-1.1.0-source.zip
+          unzip -q RaggKick-1.1.0-source.zip -d _raggkick_src
+          test -f _raggkick_src/RaggKick/CMakeLists.txt
+
+      - name: Configure Intel x86_64
+        working-directory: _raggkick_src/RaggKick
+        run: |
+          cmake -S . -B build -G Xcode \
+            -DCMAKE_OSX_ARCHITECTURES=x86_64 \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=10.13
+
+      - name: Build VST3 and AU
+        working-directory: _raggkick_src/RaggKick
+        run: |
+          cmake --build build --config Release --target RaggKick_VST3 RaggKick_AU --parallel 4
+
+      - name: Validate plug-ins
+        working-directory: _raggkick_src/RaggKick
+        run: |
+          set -euo pipefail
+          VST3="$(find build -type d -name RaggKick.vst3 | head -1)"
+          AU="$(find build -type d -name RaggKick.component | head -1)"
+          test -n "$VST3" && test -n "$AU"
+          file "$VST3/Contents/MacOS/RaggKick"
+          file "$AU/Contents/MacOS/RaggKick"
+          lipo -info "$VST3/Contents/MacOS/RaggKick" | grep -q x86_64
+          lipo -info "$AU/Contents/MacOS/RaggKick" | grep -q x86_64
+          codesign --force --deep --sign - "$VST3"
+          codesign --force --deep --sign - "$AU"
+          codesign --verify --deep --strict "$VST3"
+          codesign --verify --deep --strict "$AU"
+
+      - name: Create PKG and DMG
+        working-directory: _raggkick_src/RaggKick
+        run: |
+          set -euo pipefail
+          VST3="$(find build -type d -name RaggKick.vst3 | head -1)"
+          AU="$(find build -type d -name RaggKick.component | head -1)"
+          rm -rf pkgroot scripts dmgroot
+          mkdir -p pkgroot/Library/Audio/Plug-Ins/VST3
+          mkdir -p pkgroot/Library/Audio/Plug-Ins/Components
+          mkdir -p scripts dmgroot
+          ditto "$VST3" "pkgroot/Library/Audio/Plug-Ins/VST3/RaggKick.vst3"
+          ditto "$AU" "pkgroot/Library/Audio/Plug-Ins/Components/RaggKick.component"
+          cp packaging/postinstall scripts/postinstall
+          chmod +x scripts/postinstall
+          pkgbuild \
+            --root pkgroot \
+            --scripts scripts \
+            --identifier audio.3rdi.raggkick.pkg \
+            --version 1.1.0 \
+            --install-location / \
+            dmgroot/RaggKick-1.1.0-macOS-Intel.pkg
+          cp README.md dmgroot/README.txt
+          hdiutil create \
+            -volname "RaggKick 1.1 Intel" \
+            -srcfolder dmgroot \
+            -ov \
+            -format UDZO \
+            RaggKick-1.1.0-macOS-Intel.dmg
+          hdiutil verify RaggKick-1.1.0-macOS-Intel.dmg
+          shasum -a 256 RaggKick-1.1.0-macOS-Intel.dmg | tee RaggKick-1.1.0-macOS-Intel.sha256
+
+      - name: Upload final installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: RaggKick-1.1.0-macOS-Intel-DMG
+          path: |
+            _raggkick_src/RaggKick/RaggKick-1.1.0-macOS-Intel.dmg
+            _raggkick_src/RaggKick/RaggKick-1.1.0-macOS-Intel.sha256
+          if-no-files-found: error
+          retention-days: 14
