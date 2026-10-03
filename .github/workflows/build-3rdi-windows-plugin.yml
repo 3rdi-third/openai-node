@@ -25,12 +25,12 @@ jobs:
       - name: Configure JUCE Windows project
         shell: pwsh
         run: |
-          cmake -S macos-3rdi-plugin -B windows-build -G "Visual Studio 17 2022" -A x64
+          cmake -S macos-3rdi-plugin -B windows-build -G Ninja -DCMAKE_BUILD_TYPE=Release
 
       - name: Build VST3 and Standalone
         shell: pwsh
         run: |
-          cmake --build windows-build --config Release --parallel 3
+          cmake --build windows-build --parallel 3
 
       - name: Locate Windows binaries
         id: locate
